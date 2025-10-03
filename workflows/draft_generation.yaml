@@ -1,0 +1,44 @@
+main:
+  params: [event]
+  steps:
+    - assign:
+        assign:
+          - job_id: ${event.job_id}
+          - project_id: ${sys.get_env("GCP_PROJECT")}
+          - worker_url: ${sys.get_env("WORKER_URL")}
+          - backend_url: ${sys.get_env("BACKEND_URL")}
+    - callWorker:
+        call:
+          url: ${worker_url + "/run-pipeline"}
+          method: POST
+          headers:
+            Content-Type: application/json
+          body:
+            job_id: ${job_id}
+            draft_id: ${event.draft_id}
+            project_id: ${project_id}
+            primary_keyword: ${event.primary_keyword}
+            supporting_keywords: ${event.supporting_keywords}
+            prompt_version: ${event.prompt_version}
+            persona: ${event.persona}
+            intent: ${event.intent}
+            word_count_range: ${event.word_count_range}
+            prohibited_claims: ${event.prohibited_claims}
+            style_guide_id: ${event.style_guide_id}
+            existing_article_ids: ${event.existing_article_ids}
+          auth:
+            type: OIDC
+    - persistOutputs:
+        call:
+          url: ${backend_url + "/internal/drafts"}
+          method: POST
+          headers:
+            Content-Type: application/json
+          body:
+            job_id: ${job_id}
+            draft_id: ${event.draft_id}
+            payload: ${callWorker.body.result}
+          auth:
+            type: OIDC
+    - return:
+        return: ${callWorker.body}
