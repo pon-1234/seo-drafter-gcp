@@ -134,32 +134,42 @@ def get_draft(
     store: DraftStorage = Depends(get_storage),
     quality: QualityEngine = Depends(get_quality_engine),
 ) -> DraftBundle:
-    local = store.get_local(draft_id)
-    if not local:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found")
     import json
 
+    # List artifacts from GCS or local store
+    artifacts = store.list_artifacts(draft_id)
+    if not artifacts:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found")
+
+    # Read quality and links data
     quality_payload = {}
     links_payload = []
-    for path_key, data in local.items():
-        if path_key.endswith("quality.json"):
-            try:
-                quality_payload = json.loads(data)
-            except json.JSONDecodeError:
-                logger.warning("Quality payload for %s is not valid JSON", draft_id)
-        elif path_key.endswith("links.json"):
-            try:
-                links_data = json.loads(data)
-                links_payload = links_data.get("suggestions", [])
-            except json.JSONDecodeError:
-                logger.warning("Links payload for %s is not valid JSON", draft_id)
 
-    paths = {k: k for k in local.keys()}
+    for filename, full_path in artifacts.items():
+        if filename == "quality.json":
+            data = store.read_artifact(full_path)
+            if data:
+                try:
+                    quality_payload = json.loads(data)
+                except json.JSONDecodeError:
+                    logger.warning("Quality payload for %s is not valid JSON", draft_id)
+        elif filename == "links.json":
+            data = store.read_artifact(full_path)
+            if data:
+                try:
+                    links_data = json.loads(data)
+                    links_payload = links_data.get("suggestions", [])
+                except json.JSONDecodeError:
+                    logger.warning("Links payload for %s is not valid JSON", draft_id)
+
+    # Build paths dict and signed URLs
+    paths = artifacts
     signed_urls = {}
     for key, path_value in paths.items():
         url = store.get_signed_url(path_value)
         if url:
             signed_urls[key] = url
+
     return quality.bundle(
         draft_id=draft_id,
         paths=paths,

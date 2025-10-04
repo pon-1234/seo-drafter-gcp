@@ -45,8 +45,55 @@ class DraftStorage:
     def get_signed_url(self, path: str, expires: int = 3600) -> Optional[str]:
         if not self._client:
             return None
-        blob = self._bucket().blob(path)
-        return blob.generate_signed_url(expiration=expires)
+        # Signed URLs require service account key, not available in Cloud Run with default credentials
+        # Return public GCS path instead
+        return f"gs://{self._settings.drafts_bucket}/{path}"
 
     def get_local(self, draft_id: str) -> Dict[str, str]:
         return self._local_store.get(draft_id, {})
+
+    def list_artifacts(self, draft_id: str) -> Dict[str, str]:
+        """List all artifacts for a draft. Returns dict of {artifact_name: full_path}."""
+        prefix = f"projects/{get_settings().project_id}/drafts/{draft_id}/"
+
+        # Try GCS first
+        if self._client:
+            try:
+                bucket = self._bucket()
+                blobs = bucket.list_blobs(prefix=prefix)
+                artifacts = {}
+                for blob in blobs:
+                    # Extract just the filename from the full path
+                    filename = blob.name.replace(prefix, "")
+                    if filename:  # Skip the directory itself
+                        artifacts[filename] = blob.name
+                return artifacts
+            except Exception as e:
+                logger.error("Failed to list GCS artifacts for %s: %s", draft_id, e)
+
+        # Fallback to local store
+        local = self._local_store.get(draft_id, {})
+        artifacts = {}
+        for path in local.keys():
+            if path.startswith(prefix):
+                filename = path.replace(prefix, "")
+                artifacts[filename] = path
+        return artifacts
+
+    def read_artifact(self, path: str) -> Optional[str]:
+        """Read artifact content from GCS or local store."""
+        # Try GCS first
+        if self._client:
+            try:
+                blob = self._bucket().blob(path)
+                if blob.exists():
+                    return blob.download_as_text()
+            except Exception as e:
+                logger.error("Failed to read GCS artifact %s: %s", path, e)
+
+        # Fallback to local store - search through all drafts
+        for draft_data in self._local_store.values():
+            if path in draft_data:
+                return draft_data[path]
+
+        return None

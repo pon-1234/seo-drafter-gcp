@@ -37,7 +37,7 @@ export default function BriefPage() {
           .map((v) => v.trim())
           .filter(Boolean)
       };
-      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
+      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://seo-drafter-api-yxk2eqrkvq-an.a.run.app';
       const response = await fetch(baseUrl + '/api/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -59,7 +59,7 @@ export default function BriefPage() {
 
   return (
     <Card>
-      <CardHeader title="Brief入力フォーム" description="生成に必要な情報を入力し、Cloud Workflows にジョブを登録します。" />
+      <CardHeader title="記事作成依頼フォーム" description="生成に必要な情報を入力し、Cloud Workflows にジョブを登録します。" />
       <form onSubmit={onSubmit}>
         <CardContent className="space-y-6">
           <div className="grid gap-4 md:grid-cols-2">

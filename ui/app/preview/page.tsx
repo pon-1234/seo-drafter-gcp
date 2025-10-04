@@ -1,6 +1,7 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useState, useEffect, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -28,18 +29,27 @@ interface DraftBundle {
   internal_links?: InternalLink[];
 }
 
-export default function PreviewPage() {
+function PreviewPageContent() {
+  const searchParams = useSearchParams();
   const [draftId, setDraftId] = useState('');
   const [bundle, setBundle] = useState<DraftBundle | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  // Load draft from URL query parameter on mount
+  useEffect(() => {
+    const draftIdFromUrl = searchParams.get('draft_id');
+    if (draftIdFromUrl) {
+      setDraftId(draftIdFromUrl);
+      fetchDraft(draftIdFromUrl);
+    }
+  }, [searchParams]);
+
+  const fetchDraft = async (id: string) => {
     setError(null);
     setBundle(null);
     try {
-      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
-      const response = await fetch(baseUrl + `/api/drafts/${draftId}`);
+      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://seo-drafter-api-yxk2eqrkvq-an.a.run.app';
+      const response = await fetch(baseUrl + `/api/drafts/${id}`);
       if (!response.ok) {
         throw new Error(await response.text());
       }
@@ -49,6 +59,11 @@ export default function PreviewPage() {
       console.error(err);
       setError('ドラフトの取得に失敗しました。');
     }
+  };
+
+  const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    await fetchDraft(draftId);
   };
 
   return (
@@ -144,5 +159,13 @@ export default function PreviewPage() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+export default function PreviewPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <PreviewPageContent />
+    </Suspense>
   );
 }

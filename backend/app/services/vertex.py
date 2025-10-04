@@ -6,13 +6,12 @@ from typing import Any, Dict, List, Optional
 
 try:  # pragma: no cover - optional dependency
     from google.cloud import aiplatform  # type: ignore
-    from vertexai.preview.generative_models import (  # type: ignore
-        GenerativeModel,
-        Tool,
-        grounding,
-    )
+    import vertexai  # type: ignore
+    from vertexai.generative_models import GenerativeModel, Tool  # type: ignore
+    from vertexai.preview import grounding  # type: ignore
 except ImportError:  # pragma: no cover - local fallback
     aiplatform = None
+    vertexai = None
     GenerativeModel = None
     Tool = None
     grounding = None
@@ -28,13 +27,13 @@ class VertexGateway:
 
     def __init__(self) -> None:
         self._settings = get_settings()
-        if aiplatform:
-            aiplatform.init(project=self._settings.project_id)
+        if vertexai:
+            vertexai.init(project=self._settings.project_id, location="asia-northeast1")
 
     def generate_persona(self, request: PersonaDeriveRequest) -> Persona:
         prompt = self._build_persona_prompt(request)
-        if aiplatform:
-            model = aiplatform.GenerativeModel(self._settings.vertex_model_flash)
+        if GenerativeModel:
+            model = GenerativeModel(self._settings.vertex_model_flash)
             result = model.generate_content(prompt, generation_config={"temperature": 0.2})
             try:
                 data = result.candidates[0].text  # type: ignore[attr-defined]
@@ -60,11 +59,11 @@ class VertexGateway:
         )
 
     def invoke_generation(self, model: str, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        if not aiplatform:
+        if not GenerativeModel:
             logger.info("Vertex AI SDK not available; returning input as echo")
             return {"model": model, "input": input_data, "output": {"echo": True}}
 
-        gen_model = aiplatform.GenerativeModel(model)
+        gen_model = GenerativeModel(model)
         response = gen_model.generate_content(
             [input_data["prompt"]],
             generation_config={

@@ -1,7 +1,7 @@
 import { ReactNode } from 'react';
 
-export function Card({ children }: { children: ReactNode }) {
-  return <div className="rounded-lg border border-slate-200 bg-white shadow-sm">{children}</div>;
+export function Card({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={`rounded-lg border border-slate-200 bg-white shadow-sm ${className || ''}`}>{children}</div>;
 }
 
 export function CardHeader({ title, description }: { title: string; description?: string }) {
@@ -13,8 +13,8 @@ export function CardHeader({ title, description }: { title: string; description?
   );
 }
 
-export function CardContent({ children }: { children: ReactNode }) {
-  return <div className="px-6 py-4">{children}</div>;
+export function CardContent({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={`px-6 py-4 ${className || ''}`}>{children}</div>;
 }
 
 export function CardFooter({ children }: { children: ReactNode }) {

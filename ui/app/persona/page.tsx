@@ -46,7 +46,7 @@ export default function PersonaPage() {
     setLoading(true);
     setMessage(null);
     try {
-      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
+      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://seo-drafter-api-yxk2eqrkvq-an.a.run.app';
       const response = await fetch(`${baseUrl}/api/persona/derive`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

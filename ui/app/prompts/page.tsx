@@ -50,7 +50,7 @@ export default function PromptsPage() {
           persona: '{{persona.name}}'
         }
       };
-      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
+      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://seo-drafter-api-yxk2eqrkvq-an.a.run.app';
       const response = await fetch(baseUrl + '/api/prompts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

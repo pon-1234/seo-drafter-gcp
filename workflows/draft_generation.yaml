@@ -4,9 +4,10 @@ main:
     - assign:
         assign:
           - job_id: ${event.job_id}
-          - project_id: ${sys.get_env("GCP_PROJECT")}
-          - worker_url: ${sys.get_env("WORKER_URL")}
-          - backend_url: ${sys.get_env("BACKEND_URL")}
+          - draft_id: ${default(map.get(event, "draft_id"), job_id)}
+          - project_id: "seo-drafter-gcp"
+          - worker_url: "https://seo-drafter-worker-yxk2eqrkvq-an.a.run.app"
+          - backend_url: "https://seo-drafter-api-yxk2eqrkvq-an.a.run.app"
     - callWorker:
         call: http.post
         args:
@@ -15,7 +16,7 @@ main:
             Content-Type: application/json
           body:
             job_id: ${job_id}
-            draft_id: ${event.draft_id}
+            draft_id: ${draft_id}
             project_id: ${project_id}
             primary_keyword: ${event.primary_keyword}
             supporting_keywords: ${event.supporting_keywords}
@@ -37,7 +38,7 @@ main:
             Content-Type: application/json
           body:
             job_id: ${job_id}
-            draft_id: ${event.draft_id}
+            draft_id: ${draft_id}
             payload: ${workerResponse.body.result}
           auth:
             type: OIDC

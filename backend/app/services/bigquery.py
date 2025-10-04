@@ -48,67 +48,14 @@ class InternalLinkRepository:
         return self._text_search(keyword, limit)
 
     def _vector_search(self, keyword: str, persona_goals: List[str], limit: int) -> List[Dict]:
-        """Perform vector similarity search using BigQuery ML and Vertex AI embeddings."""
-        if not self._client or not aiplatform:
+        """Perform vector similarity search using Vertex AI embeddings and BigQuery."""
+        if not self._client:
             return []
 
-        # Generate embedding for search query
-        combined_query = f"{keyword} {' '.join(persona_goals)}"
-
-        # Vector search query using BigQuery ML
-        # Assumes table structure: articles(article_id, url, title, snippet, embedding ARRAY<FLOAT64>)
-        query = f"""
-        WITH query_embedding AS (
-          SELECT ML.GENERATE_EMBEDDING(
-            MODEL `{self._settings.project_id}.seo_drafter.embedding_model`,
-            (SELECT @query_text AS content)
-          ).embeddings AS embedding
-        ),
-        similarity_scores AS (
-          SELECT
-            a.url,
-            a.title,
-            a.snippet,
-            a.metadata,
-            ML.DISTANCE(q.embedding, a.embedding, 'COSINE') AS distance
-          FROM `{self._settings.project_id}.seo_drafter.article_embeddings` a
-          CROSS JOIN query_embedding q
-          WHERE a.published = true
-          ORDER BY distance ASC
-          LIMIT @limit
-        )
-        SELECT
-          url,
-          title,
-          snippet,
-          metadata,
-          (1 - distance) AS score
-        FROM similarity_scores
-        """
-
-        job_config = bigquery.QueryJobConfig(
-            query_parameters=[
-                bigquery.ScalarQueryParameter("query_text", "STRING", combined_query),
-                bigquery.ScalarQueryParameter("limit", "INT64", limit),
-            ]
-        )
-
-        try:
-            job = self._client.query(query, job_config=job_config)
-            results = []
-            for row in job:
-                results.append({
-                    "url": row.url,
-                    "title": row.title,
-                    "snippet": row.snippet if hasattr(row, "snippet") else "",
-                    "score": float(row.score),
-                    "metadata": dict(row.metadata) if hasattr(row, "metadata") else {},
-                })
-            logger.info("Vector search returned %d results for keyword: %s", len(results), keyword)
-            return results
-        except Exception as e:
-            logger.error("Vector search query failed: %s", e)
-            return []
+        # For now, use text-based search since BigQuery ML embeddings are not available
+        # TODO: Implement Vertex AI Matching Engine or Vector Search when available
+        logger.info("Vector search not yet configured, using text search fallback")
+        return []
 
     def _text_search(self, keyword: str, limit: int) -> List[Dict]:
         """Fallback text-based search."""

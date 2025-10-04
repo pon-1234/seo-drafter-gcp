@@ -2,7 +2,7 @@ import Link from 'next/link';
 
 const sections = [
   {
-    title: 'Brief入力フォーム',
+    title: '記事作成依頼',
     description: 'キーワード、意図、スタイルガイドを指定して生成ジョブを作成します。',
     href: '/brief'
   },

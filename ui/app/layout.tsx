@@ -16,7 +16,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             <h1 className="text-2xl font-semibold text-primary">SEO Drafter</h1>
             <nav className="flex gap-4 text-sm text-slate-600">
               <a href="/brief" className="hover:text-primary">
-                Brief入力
+                記事作成依頼
               </a>
               <a href="/prompts" className="hover:text-primary">
                 プロンプト管理

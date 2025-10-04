@@ -9,6 +9,7 @@ interface Job {
   id: string;
   status: 'pending' | 'running' | 'completed' | 'failed';
   workflow_execution_id?: string;
+  draft_id?: string;
   created_at: string;
   updated_at: string;
 }
@@ -23,7 +24,7 @@ export default function QualityPage() {
     setError(null);
     setJob(null);
     try {
-      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
+      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://seo-drafter-api-yxk2eqrkvq-an.a.run.app';
       const response = await fetch(baseUrl + `/api/jobs/${jobId}`);
       if (!response.ok) {
         throw new Error(await response.text());
@@ -55,6 +56,11 @@ export default function QualityPage() {
             <p>
               <span className="font-medium text-slate-600">状態:</span> {job.status}
             </p>
+            {job.draft_id ? (
+              <p>
+                <span className="font-medium text-slate-600">ドラフトID:</span> {job.draft_id}
+              </p>
+            ) : null}
             <p>
               <span className="font-medium text-slate-600">作成日時:</span> {new Date(job.created_at).toLocaleString()}
             </p>
@@ -66,8 +72,18 @@ export default function QualityPage() {
                 <span className="font-medium text-slate-600">Workflow Execution:</span> {job.workflow_execution_id}
               </p>
             ) : null}
+            {job.status === 'completed' && job.draft_id ? (
+              <div className="pt-3">
+                <a
+                  href={`/preview?draft_id=${job.draft_id}`}
+                  className="inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-primary/90"
+                >
+                  生成プレビューを表示
+                </a>
+              </div>
+            ) : null}
             <p className="rounded-md border border-slate-200 bg-slate-50 p-3">
-              再現性: 同一プロンプトと seed で再実行すると同じ出力となるよう、Firestone にプロンプトとモデル設定を保存します。
+              再現性: 同一プロンプトと seed で再実行すると同じ出力となるよう、Firestore にプロンプトとモデル設定を保存します。
             </p>
           </CardContent>
         </Card>
