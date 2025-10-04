@@ -19,6 +19,11 @@ app.add_middleware(
 app.include_router(router)
 
 
-@app.get("/healthz")
+@app.get("/healthz", include_in_schema=False)
 def healthcheck() -> dict:
     return {"status": "ok", "project_id": settings.project_id}
+
+
+@app.head("/healthz", include_in_schema=False)
+def healthcheck_head() -> dict:
+    return healthcheck()

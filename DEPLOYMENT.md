@@ -60,15 +60,19 @@ Terraformは以下をデプロイします:
 ## Step 2: BigQuery Embedding Modelの作成
 
 ```bash
-# BigQueryで埋め込みモデルを作成
-bq query --use_legacy_sql=false '
+# BigQuery から Vertex AI textembedding-gecko@003 を参照するリモートモデルを作成
+bq query --use_legacy_sql=false "
 CREATE OR REPLACE MODEL `seo-drafter-gcp.seo_drafter.embedding_model`
 OPTIONS(
-  model_type="CLOUD_AI_TEXT_EMBEDDING_MODEL_V1",
-  endpoint="textembedding-gecko@003"
+  model_type = 'VERTEX_MODEL',
+  remote_model_id = 'projects/${PROJECT_NUMBER}/locations/us-central1/publishers/google/models/textembedding-gecko@003'
 );
-'
+"
 ```
+
+> **Note**
+> `${PROJECT_NUMBER}` は Vertex AI を有効化した GCP プロジェクト番号に置き換えてください。
+> 利用可能なモデルとロケーションは Vertex AI モデルリファレンス(https://cloud.google.com/vertex-ai/docs/generative-ai/model-reference/text-embeddings)を確認してください。
 
 ## Step 3: 環境変数の設定
 
