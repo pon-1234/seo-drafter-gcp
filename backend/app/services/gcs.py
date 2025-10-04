@@ -18,9 +18,9 @@ class DraftStorage:
     """Handles Cloud Storage persistence for draft artifacts."""
 
     def __init__(self) -> None:
-        settings = get_settings()
-        self._bucket_name = settings.drafts_bucket
-        self._client = storage.Client(project=settings.project_id) if storage else None
+        self._settings = get_settings()
+        self._bucket_name = self._settings.drafts_bucket
+        self._client = storage.Client(project=self._settings.project_id) if storage else None
         self._local_store: Dict[str, Dict[str, str]] = {}
 
     def _bucket(self):  # pragma: no cover - requires GCP
