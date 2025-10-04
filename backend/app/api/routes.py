@@ -167,7 +167,8 @@ def get_draft(
     signed_urls = {}
     for key, path_value in paths.items():
         url = store.get_signed_url(path_value)
-        if url:
+        # Only include HTTP/HTTPS URLs, not gs:// paths
+        if url and (url.startswith('http://') or url.startswith('https://')):
             signed_urls[key] = url
 
     return quality.bundle(
@@ -217,7 +218,8 @@ def persist_draft(
     signed_urls = {}
     for key, path_value in paths.items():
         url = store.get_signed_url(path_value)
-        if url:
+        # Only include HTTP/HTTPS URLs, not gs:// paths
+        if url and (url.startswith('http://') or url.startswith('https://')):
             signed_urls[key] = url
     bundle = quality.bundle(
         draft_id=draft_id,
@@ -282,6 +284,7 @@ def approve_draft(
     signed_urls = {}
     for key, path_value in paths.items():
         url = store.get_signed_url(path_value)
-        if url:
+        # Only include HTTP/HTTPS URLs, not gs:// paths
+        if url and (url.startswith('http://') or url.startswith('https://')):
             signed_urls[key] = url
     return quality.bundle(draft_id, paths, metadata, quality_payload, signed_urls=signed_urls or None)
