@@ -140,13 +140,20 @@ def get_draft(
     import json
 
     quality_payload = {}
+    links_payload = []
     for path_key, data in local.items():
         if path_key.endswith("quality.json"):
             try:
                 quality_payload = json.loads(data)
             except json.JSONDecodeError:
                 logger.warning("Quality payload for %s is not valid JSON", draft_id)
-            break
+        elif path_key.endswith("links.json"):
+            try:
+                links_data = json.loads(data)
+                links_payload = links_data.get("suggestions", [])
+            except json.JSONDecodeError:
+                logger.warning("Links payload for %s is not valid JSON", draft_id)
+
     paths = {k: k for k in local.keys()}
     signed_urls = {}
     for key, path_value in paths.items():
@@ -159,6 +166,7 @@ def get_draft(
         metadata={"status": "preview"},
         draft_content=quality_payload,
         signed_urls=signed_urls or None,
+        internal_links=links_payload,
     )
 
 
@@ -207,6 +215,7 @@ def persist_draft(
         metadata={"job_id": payload.job_id, "draft_id": draft_id, "status": "generated"},
         draft_content=quality_snapshot,
         signed_urls=signed_urls or None,
+        internal_links=links,
     )
     return bundle
 

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
 try:  # pragma: no cover - optional dependency
     from google.cloud import bigquery  # type: ignore
+    from google.cloud import aiplatform  # type: ignore
 except ImportError:  # pragma: no cover - local fallback
     bigquery = None
+    aiplatform = None
 
 from ..core.config import get_settings
 
@@ -19,6 +21,8 @@ class InternalLinkRepository:
     def __init__(self) -> None:
         self._settings = get_settings()
         self._client = bigquery.Client(project=self._settings.project_id) if bigquery else None
+        if aiplatform:
+            aiplatform.init(project=self._settings.project_id)
 
     def search(self, keyword: str, persona_goals: List[str], limit: int = 5) -> List[Dict]:
         if not self._client:
@@ -28,23 +32,175 @@ class InternalLinkRepository:
                     "url": f"https://example.com/articles/{keyword}-guide",
                     "title": f"{keyword} ガイド",
                     "score": 0.78,
+                    "snippet": f"{keyword}に関する詳細なガイドです。",
                 }
             ]
 
-        # Placeholder query; to be replaced with vector search once dataset is ready.
+        # Use Vector Search to find semantically similar articles
+        try:
+            results = self._vector_search(keyword, persona_goals, limit)
+            if results:
+                return results
+        except Exception as e:
+            logger.warning("Vector search failed, falling back to text search: %s", e)
+
+        # Fallback to text-based search
+        return self._text_search(keyword, limit)
+
+    def _vector_search(self, keyword: str, persona_goals: List[str], limit: int) -> List[Dict]:
+        """Perform vector similarity search using BigQuery ML and Vertex AI embeddings."""
+        if not self._client or not aiplatform:
+            return []
+
+        # Generate embedding for search query
+        combined_query = f"{keyword} {' '.join(persona_goals)}"
+
+        # Vector search query using BigQuery ML
+        # Assumes table structure: articles(article_id, url, title, snippet, embedding ARRAY<FLOAT64>)
         query = f"""
-        SELECT url, title, 0.0 AS score
-        FROM `{self._settings.project_id}.dataset.articles`
-        WHERE CONTAINS_SUBSTR(summary, @keyword)
+        WITH query_embedding AS (
+          SELECT ML.GENERATE_EMBEDDING(
+            MODEL `{self._settings.project_id}.seo_drafter.embedding_model`,
+            (SELECT @query_text AS content)
+          ).embeddings AS embedding
+        ),
+        similarity_scores AS (
+          SELECT
+            a.url,
+            a.title,
+            a.snippet,
+            a.metadata,
+            ML.DISTANCE(q.embedding, a.embedding, 'COSINE') AS distance
+          FROM `{self._settings.project_id}.seo_drafter.article_embeddings` a
+          CROSS JOIN query_embedding q
+          WHERE a.published = true
+          ORDER BY distance ASC
+          LIMIT @limit
+        )
+        SELECT
+          url,
+          title,
+          snippet,
+          metadata,
+          (1 - distance) AS score
+        FROM similarity_scores
+        """
+
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("query_text", "STRING", combined_query),
+                bigquery.ScalarQueryParameter("limit", "INT64", limit),
+            ]
+        )
+
+        try:
+            job = self._client.query(query, job_config=job_config)
+            results = []
+            for row in job:
+                results.append({
+                    "url": row.url,
+                    "title": row.title,
+                    "snippet": row.snippet if hasattr(row, "snippet") else "",
+                    "score": float(row.score),
+                    "metadata": dict(row.metadata) if hasattr(row, "metadata") else {},
+                })
+            logger.info("Vector search returned %d results for keyword: %s", len(results), keyword)
+            return results
+        except Exception as e:
+            logger.error("Vector search query failed: %s", e)
+            return []
+
+    def _text_search(self, keyword: str, limit: int) -> List[Dict]:
+        """Fallback text-based search."""
+        query = f"""
+        SELECT
+          url,
+          title,
+          snippet,
+          0.5 AS score
+        FROM `{self._settings.project_id}.seo_drafter.articles`
+        WHERE
+          published = true
+          AND (
+            LOWER(title) LIKE CONCAT('%', LOWER(@keyword), '%')
+            OR LOWER(snippet) LIKE CONCAT('%', LOWER(@keyword), '%')
+          )
+        ORDER BY updated_at DESC
         LIMIT @limit
         """
-        job = self._client.query(query, job_config=bigquery.QueryJobConfig(
+
+        job_config = bigquery.QueryJobConfig(
             query_parameters=[
                 bigquery.ScalarQueryParameter("keyword", "STRING", keyword),
                 bigquery.ScalarQueryParameter("limit", "INT64", limit),
             ]
-        ))
-        results = []
-        for row in job:
-            results.append({"url": row.url, "title": row.title, "score": row.score})
-        return results
+        )
+
+        try:
+            job = self._client.query(query, job_config=job_config)
+            results = []
+            for row in job:
+                results.append({
+                    "url": row.url,
+                    "title": row.title,
+                    "snippet": row.snippet if hasattr(row, "snippet") else "",
+                    "score": float(row.score),
+                })
+            return results
+        except Exception as e:
+            logger.error("Text search query failed: %s", e)
+            return []
+
+    def store_article_embedding(
+        self,
+        article_id: str,
+        url: str,
+        title: str,
+        snippet: str,
+        content: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """Store article with its embedding for future vector search."""
+        if not self._client:
+            logger.warning("BigQuery client unavailable; skipping embedding storage")
+            return False
+
+        # Generate embedding using Vertex AI
+        # This would typically be done in a batch job
+        insert_query = f"""
+        INSERT INTO `{self._settings.project_id}.seo_drafter.article_embeddings`
+        (article_id, url, title, snippet, content, metadata, embedding, published, created_at, updated_at)
+        SELECT
+          @article_id,
+          @url,
+          @title,
+          @snippet,
+          @content,
+          @metadata,
+          ML.GENERATE_EMBEDDING(
+            MODEL `{self._settings.project_id}.seo_drafter.embedding_model`,
+            (SELECT @content AS content)
+          ).embeddings,
+          true,
+          CURRENT_TIMESTAMP(),
+          CURRENT_TIMESTAMP()
+        """
+
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("article_id", "STRING", article_id),
+                bigquery.ScalarQueryParameter("url", "STRING", url),
+                bigquery.ScalarQueryParameter("title", "STRING", title),
+                bigquery.ScalarQueryParameter("snippet", "STRING", snippet),
+                bigquery.ScalarQueryParameter("content", "STRING", content),
+                bigquery.ScalarQueryParameter("metadata", "JSON", metadata or {}),
+            ]
+        )
+
+        try:
+            self._client.query(insert_query, job_config=job_config).result()
+            logger.info("Stored embedding for article: %s", article_id)
+            return True
+        except Exception as e:
+            logger.error("Failed to store article embedding: %s", e)
+            return False

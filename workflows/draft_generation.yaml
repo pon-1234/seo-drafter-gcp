@@ -8,9 +8,9 @@ main:
           - worker_url: ${sys.get_env("WORKER_URL")}
           - backend_url: ${sys.get_env("BACKEND_URL")}
     - callWorker:
-        call:
+        call: http.post
+        args:
           url: ${worker_url + "/run-pipeline"}
-          method: POST
           headers:
             Content-Type: application/json
           body:
@@ -28,17 +28,18 @@ main:
             existing_article_ids: ${event.existing_article_ids}
           auth:
             type: OIDC
+        result: workerResponse
     - persistOutputs:
-        call:
+        call: http.post
+        args:
           url: ${backend_url + "/internal/drafts"}
-          method: POST
           headers:
             Content-Type: application/json
           body:
             job_id: ${job_id}
             draft_id: ${event.draft_id}
-            payload: ${callWorker.body.result}
+            payload: ${workerResponse.body.result}
           auth:
             type: OIDC
     - return:
-        return: ${callWorker.body}
+        return: ${workerResponse.body}

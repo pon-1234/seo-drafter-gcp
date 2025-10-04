@@ -107,12 +107,21 @@ class DraftPersistenceRequest(BaseModel):
 
 
 
+class InternalLink(BaseModel):
+    url: str
+    title: str
+    anchor: str
+    score: float
+    snippet: Optional[str] = None
+
+
 class DraftBundle(BaseModel):
     draft_id: str
     gcs_paths: Dict[str, str]
     signed_urls: Optional[Dict[str, HttpUrl]] = None
     quality: DraftQualitySignals
     metadata: Dict[str, str]
+    internal_links: Optional[List[InternalLink]] = None
 
 
 class DraftApproveRequest(BaseModel):

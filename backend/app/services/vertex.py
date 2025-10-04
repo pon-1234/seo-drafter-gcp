@@ -1,12 +1,21 @@
 from __future__ import annotations
 
+import json
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 try:  # pragma: no cover - optional dependency
     from google.cloud import aiplatform  # type: ignore
+    from vertexai.preview.generative_models import (  # type: ignore
+        GenerativeModel,
+        Tool,
+        grounding,
+    )
 except ImportError:  # pragma: no cover - local fallback
     aiplatform = None
+    GenerativeModel = None
+    Tool = None
+    grounding = None
 
 from ..core.config import get_settings
 from ..models import Persona, PersonaDeriveRequest
@@ -68,6 +77,68 @@ class VertexGateway:
             "model": model,
             "output": response.candidates[0].content.parts[0].text,  # type: ignore[attr-defined]
         }
+
+    def generate_with_grounding(
+        self,
+        prompt: str,
+        model: Optional[str] = None,
+        temperature: float = 0.7,
+        use_google_search: bool = True,
+    ) -> Dict[str, Any]:
+        """Generate content with Google Search Grounding for citations."""
+        if not aiplatform or not GenerativeModel or not grounding:
+            logger.warning("Vertex AI Grounding not available; returning mock response")
+            return {
+                "text": f"Generated response for: {prompt[:50]}...",
+                "grounding_metadata": {"web_search_queries": [], "grounding_support": []},
+                "citations": [],
+            }
+
+        model_name = model or self._settings.vertex_model_pro
+        gen_model = GenerativeModel(model_name)
+
+        tools = []
+        if use_google_search:
+            tools.append(Tool.from_google_search_retrieval(grounding.GoogleSearchRetrieval()))
+
+        try:
+            response = gen_model.generate_content(
+                prompt,
+                tools=tools if tools else None,
+                generation_config={
+                    "temperature": temperature,
+                    "seed": self._settings.seed,
+                },
+            )
+
+            text = response.candidates[0].content.parts[0].text  # type: ignore[attr-defined]
+            grounding_metadata = getattr(response.candidates[0], "grounding_metadata", None)  # type: ignore[attr-defined]
+
+            citations = []
+            if grounding_metadata:
+                for support in getattr(grounding_metadata, "grounding_support", []):
+                    for chunk in getattr(support, "grounding_chunk_indices", []):
+                        retrieval_metadata = getattr(grounding_metadata, "retrieval_metadata", None)
+                        if retrieval_metadata:
+                            for ref in getattr(retrieval_metadata, "web_dynamic_retrieval_score", []):
+                                citations.append({
+                                    "uri": getattr(ref, "uri", ""),
+                                    "title": getattr(ref, "title", ""),
+                                })
+
+            return {
+                "text": text,
+                "grounding_metadata": grounding_metadata,
+                "citations": citations,
+            }
+        except Exception as e:
+            logger.error("Grounding generation failed: %s", e)
+            return {
+                "text": "",
+                "grounding_metadata": {},
+                "citations": [],
+                "error": str(e),
+            }
 
     def _build_persona_prompt(self, request: PersonaDeriveRequest) -> str:
         supporting = ", ".join(request.supporting_keywords) or "なし"

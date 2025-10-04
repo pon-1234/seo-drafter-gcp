@@ -5,6 +5,14 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 
+interface InternalLink {
+  url: string;
+  title: string;
+  anchor: string;
+  score: number;
+  snippet?: string;
+}
+
 interface DraftBundle {
   draft_id: string;
   gcs_paths: Record<string, string>;
@@ -17,6 +25,7 @@ interface DraftBundle {
     citations_missing: string[];
   };
   metadata: Record<string, string>;
+  internal_links?: InternalLink[];
 }
 
 export default function PreviewPage() {
@@ -95,6 +104,43 @@ export default function PreviewPage() {
               </ul>
             </CardContent>
           </Card>
+          {bundle.internal_links && bundle.internal_links.length > 0 ? (
+            <Card className="lg:col-span-2">
+              <CardHeader title="内部リンク候補" description="BigQuery Vector Search による関連記事の提案" />
+              <CardContent>
+                <div className="space-y-4">
+                  {bundle.internal_links.map((link, index) => (
+                    <div key={index} className="rounded-lg border border-slate-200 p-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1">
+                          <h3 className="font-semibold text-slate-900">{link.title}</h3>
+                          <a
+                            href={link.url}
+                            className="mt-1 block text-sm text-primary hover:underline"
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {link.url}
+                          </a>
+                          {link.snippet ? (
+                            <p className="mt-2 text-sm text-slate-600">{link.snippet}</p>
+                          ) : null}
+                          <p className="mt-2 text-xs text-slate-500">
+                            推奨アンカーテキスト: <span className="font-medium">{link.anchor}</span>
+                          </p>
+                        </div>
+                        <div className="flex-shrink-0">
+                          <span className="inline-flex items-center rounded-full bg-primary/10 px-3 py-1 text-sm font-medium text-primary">
+                            {(link.score * 100).toFixed(0)}%
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
         </div>
       ) : null}
     </div>

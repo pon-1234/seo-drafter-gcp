@@ -55,21 +55,37 @@ npm run dev
 ## Cloud Workflows
 `workflows/draft_generation.yaml` は Cloud Workflows から Worker → Backend を直列で呼び出す最小構成。OIDC 認証で Cloud Run サービスを保護することを想定。
 
-## デプロイ例 (抜粋)
+## デプロイ
 
+### クイックスタート
+
+```bash
+# 1. 初期セットアップ (API有効化、サービスアカウント作成など)
+./scripts/setup-gcp.sh
+
+# 2. Terraformでインフラをプロビジョニング
+cd terraform
+terraform init
+terraform apply
+
+# 3. サービスをデプロイ
+cd ..
+./scripts/deploy.sh
 ```
-# Artifact Registry にコンテナを登録
- gcloud builds submit backend --tag asia-northeast1-docker.pkg.dev/$PROJECT/seo-drafter/backend
- gcloud builds submit worker --tag asia-northeast1-docker.pkg.dev/$PROJECT/seo-drafter/worker
- gcloud builds submit ui --tag asia-northeast1-docker.pkg.dev/$PROJECT/seo-drafter/ui
 
-# Cloud Run
- gcloud run deploy seo-drafter-api --image ... --allow-unauthenticated
- gcloud run deploy seo-drafter-worker --image ... --no-allow-unauthenticated
- gcloud run deploy seo-drafter-ui --image ... --allow-unauthenticated --set-env-vars NEXT_PUBLIC_API_BASE_URL=https://seo-drafter-api-xxx.run.app
+詳細なデプロイ手順は [DEPLOYMENT.md](./DEPLOYMENT.md) を参照してください。
 
-# Cloud Workflows
- gcloud workflows deploy draft-generation --source workflows/draft_generation.yaml
+### 個別デプロイ
+
+```bash
+# Backendのみ
+./scripts/deploy.sh --services backend
+
+# Workerのみ
+./scripts/deploy.sh --services worker
+
+# UIのみ
+./scripts/deploy.sh --services ui
 ```
 
 ## Firestore ドキュメント例
@@ -84,12 +100,34 @@ projects/{pid}/drafts/{draftId}
 - `prompt` ドキュメントは `versions.{version}` に System/Developer/User をフラットに保存。
 - `draft` ドキュメントは GCS パス・品質指標・監査ログ ID を保持。
 
+## 実装済み機能
+
+### Vertex AI Grounding
+- `backend/app/services/vertex.py` で Google Search Grounding を使用した引用付きコンテンツ生成
+- `worker/app/tasks/pipeline.py` でセクション生成時に Grounding を適用
+
+### BigQuery Vector Search
+- `backend/app/services/bigquery.py` で記事の埋め込みベクトル検索
+- 内部リンク候補の自動提案機能
+- UIプレビューページで内部リンク候補を表示
+
+### Infrastructure as Code
+- Terraform による GCS、BigQuery、Pub/Sub、Cloud Tasks、Cloud Workflows の管理
+- サービスアカウントと IAM 権限の自動設定
+- `terraform/` ディレクトリに完全な IaC 定義
+
+### テスト
+- Backend API の統合テスト (`backend/tests/test_api_integration.py`)
+- Vertex AI サービスの単体テスト (`backend/tests/test_vertex.py`)
+- BigQuery サービスの単体テスト (`backend/tests/test_bigquery.py`)
+- Worker パイプラインのエンドツーエンドテスト (`worker/tests/test_pipeline.py`)
+
 ## 今後の拡張ポイント
-- Vertex AI Gemini 1.5 Pro / Flash, Google Search Grounding との連携を `services/vertex.py` に実装。
-- Cloud Tasks / PubSub を用いた段階的リトライ。
-- BigQuery Vector Search (`services/bigquery.py`) で内部リンク候補を抽出。
-- Secret Manager で API キーやスタイルガイド辞書を安全に管理。
-- Cloud Monitoring / Error Reporting を Terraform or gcloud CLI で IaC 化。
+- Cloud Tasks / PubSub を用いた段階的リトライ機能の実装
+- Secret Manager で API キーやスタイルガイド辞書を安全に管理
+- Cloud Monitoring / Error Reporting のアラート設定
+- CI/CD パイプラインの構築 (Cloud Build)
+- カスタムドメインと CDN の設定
 
 ## 開発メモ
 - FastAPI / Next.js / Worker いずれもローカル動作時はダミークライアントで代替し、GCP SDK が未インストールでも破綻しないよう調整。

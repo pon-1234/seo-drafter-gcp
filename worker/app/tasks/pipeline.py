@@ -3,7 +3,20 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
+
+try:  # pragma: no cover - optional dependency
+    import sys
+    import os
+    # Add backend to path for shared services
+    backend_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../backend"))
+    if backend_path not in sys.path:
+        sys.path.insert(0, backend_path)
+    from app.services.bigquery import InternalLinkRepository
+    from app.services.vertex import VertexGateway
+except ImportError:
+    InternalLinkRepository = None  # type: ignore
+    VertexGateway = None  # type: ignore
 
 from ..core.config import get_settings
 
@@ -25,6 +38,8 @@ class DraftGenerationPipeline:
 
     def __init__(self) -> None:
         self.settings = get_settings()
+        self.vertex_gateway = VertexGateway() if VertexGateway else None
+        self.link_repository = InternalLinkRepository() if InternalLinkRepository else None
 
     def estimate_intent(self, payload: Dict) -> str:
         requested_intent = payload.get("intent")
@@ -72,35 +87,85 @@ class DraftGenerationPipeline:
     def generate_draft(self, context: PipelineContext, outline: Dict, citations: List[Dict]) -> Dict:
         logger.info("Generating draft for %s with %d outline sections", context.job_id, len(outline.get('h2', [])))
         sections = []
+        all_claims = []
+
         for h2 in outline.get("h2", []):
             paragraphs = []
             for h3 in h2.get("h3", []):
-                paragraphs.append(
-                    {
-                        "heading": h3["text"],
-                        "text": f"{h3['text']} について解説します。{context.persona.get('name', '読者')}向けに最適化。",
-                        "citations": [c["url"] for c in citations[:2]],
-                        "claim_id": f"{context.draft_id}-{h3['text']}",
-                    }
-                )
+                # Use Vertex AI with Grounding for content generation
+                prompt = self._build_section_prompt(h3["text"], context)
+                grounded_result = self._generate_grounded_content(prompt)
+
+                claim_id = f"{context.draft_id}-{h3['text']}"
+                paragraphs.append({
+                    "heading": h3["text"],
+                    "text": grounded_result.get("text", f"{h3['text']} について解説します。"),
+                    "citations": [c.get("uri", c.get("url", "")) for c in grounded_result.get("citations", citations[:2])],
+                    "claim_id": claim_id,
+                })
+
+                all_claims.append({
+                    "id": claim_id,
+                    "text": grounded_result.get("text", ""),
+                    "citations": grounded_result.get("citations", []),
+                })
+
             sections.append({"h2": h2["text"], "paragraphs": paragraphs})
 
         return {
             "draft": {
                 "sections": sections,
-                "faq": [
-                    {
-                        "question": f"{context.persona.get('name', '読者')}が抱える疑問は？",
-                        "answer": "想定される疑問に対して根拠付きで回答します。",
-                    }
-                ],
+                "faq": self._generate_faq(context),
             },
-            "claims": [
-                {"id": p["claim_id"], "text": p["text"], "citations": p.get("citations", [])}
-                for section in sections
-                for p in section["paragraphs"]
-            ],
+            "claims": all_claims,
         }
+
+    def _build_section_prompt(self, heading: str, context: PipelineContext) -> str:
+        """Build a prompt for generating a specific section."""
+        persona_name = context.persona.get("name", "読者")
+        tone = context.persona.get("tone", "実務的")
+        return (
+            f"以下の見出しについて、{persona_name}向けに{tone}なトーンで詳しく解説してください。\n"
+            f"見出し: {heading}\n"
+            f"検索意図: {context.intent}\n"
+            f"必ず信頼できる情報源に基づいて記述してください。"
+        )
+
+    def _generate_grounded_content(self, prompt: str) -> Dict[str, Any]:
+        """Generate content with Google Search Grounding."""
+        if not self.vertex_gateway:
+            logger.warning("Vertex Gateway not available, using fallback")
+            return {"text": prompt[:100] + "...", "citations": []}
+
+        try:
+            return self.vertex_gateway.generate_with_grounding(prompt, temperature=0.7)
+        except Exception as e:
+            logger.error("Grounded generation failed: %s", e)
+            return {"text": prompt[:100] + "...", "citations": []}
+
+    def _generate_faq(self, context: PipelineContext) -> List[Dict]:
+        """Generate FAQ section using Vertex AI."""
+        persona_name = context.persona.get("name", "読者")
+        pain_points = context.persona.get("pain_points", [])
+
+        faq_items = []
+        for pain in pain_points[:3]:
+            prompt = f"{persona_name}が抱える「{pain}」という課題に対する解決策を簡潔に説明してください。"
+            result = self._generate_grounded_content(prompt)
+            faq_items.append({
+                "question": pain,
+                "answer": result.get("text", "解決策を提供します。"),
+                "citations": result.get("citations", []),
+            })
+
+        if not faq_items:
+            faq_items.append({
+                "question": f"{persona_name}が抱える疑問は？",
+                "answer": "想定される疑問に対して根拠付きで回答します。",
+                "citations": [],
+            })
+
+        return faq_items
 
     def generate_meta(self, prompt: Dict) -> Dict:
         keyword = prompt["primary_keyword"]
@@ -113,18 +178,36 @@ class DraftGenerationPipeline:
             },
         }
 
-    def propose_links(self, prompt: Dict, embeddings: List[Dict]) -> List[Dict]:
+    def propose_links(self, prompt: Dict, context: PipelineContext) -> List[Dict]:
+        """Propose internal links using BigQuery Vector Search."""
         keyword = prompt["primary_keyword"]
-        results = []
-        for candidate in embeddings[:3]:
-            results.append(
-                {
+        persona_goals = context.persona.get("goals", [])
+
+        if not self.link_repository:
+            logger.warning("Link repository not available, using fallback")
+            return [{
+                "url": f"https://example.com/articles/{keyword}-guide",
+                "title": f"{keyword} ガイド",
+                "anchor": f"{keyword} と関連するガイド",
+                "score": 0.5,
+            }]
+
+        try:
+            candidates = self.link_repository.search(keyword, persona_goals, limit=5)
+            results = []
+            for candidate in candidates:
+                results.append({
                     "url": candidate["url"],
+                    "title": candidate["title"],
                     "anchor": f"{keyword} と関連する {candidate['title']}",
-                    "score": candidate["score"],
-                }
-            )
-        return results
+                    "score": candidate.get("score", 0.5),
+                    "snippet": candidate.get("snippet", ""),
+                })
+            logger.info("Proposed %d internal links for keyword: %s", len(results), keyword)
+            return results
+        except Exception as e:
+            logger.error("Link proposal failed: %s", e)
+            return []
 
     def evaluate_quality(self, draft: Dict) -> Dict:
         claims_without_citations = [c for c in draft.get("claims", []) if not c.get("citations")]
@@ -167,7 +250,7 @@ class DraftGenerationPipeline:
         ]
         draft = self.generate_draft(context, outline, citations)
         meta = self.generate_meta(payload)
-        links = self.propose_links(payload, payload.get("link_candidates", []))
+        links = self.propose_links(payload, context)
         quality = self.evaluate_quality(draft)
         bundle = self.bundle_outputs(context, outline, draft, meta, links, quality)
         logger.info("Completed pipeline for job %s", payload["job_id"])
