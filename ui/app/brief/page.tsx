@@ -14,7 +14,8 @@ export default function BriefPage() {
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     setLoading(true);
     setStatus(null);
     try {
@@ -48,7 +49,7 @@ export default function BriefPage() {
       }
       const body = await response.json();
       setStatus(`ジョブ作成に成功しました: ${body.id}`);
-      event.currentTarget.reset();
+      formElement.reset();
     } catch (error) {
       console.error(error);
       setStatus('ジョブ作成に失敗しました。バックエンド設定を確認してください。');
