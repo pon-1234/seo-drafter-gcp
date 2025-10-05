@@ -34,6 +34,7 @@ class QualityEngine:
         draft_content: Dict,
         signed_urls: Optional[Dict[str, str]] = None,
         internal_links: Optional[List[Dict]] = None,
+        draft_text: Optional[str] = None,
     ) -> DraftBundle:
         quality = self.evaluate(draft_content)
 
@@ -58,4 +59,5 @@ class QualityEngine:
             quality=quality,
             metadata=metadata,
             internal_links=links,
+            draft_content=draft_text,
         )

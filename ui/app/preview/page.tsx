@@ -27,6 +27,7 @@ interface DraftBundle {
   };
   metadata: Record<string, string>;
   internal_links?: InternalLink[];
+  draft_content?: string;
 }
 
 function PreviewPageContent() {
@@ -80,6 +81,16 @@ function PreviewPageContent() {
       </Card>
       {bundle ? (
         <div className="grid gap-6 lg:grid-cols-2">
+          {bundle.draft_content ? (
+            <Card className="lg:col-span-2">
+              <CardHeader title="生成された本文" description="Markdown形式のドラフト記事" />
+              <CardContent>
+                <div className="prose prose-slate max-w-none">
+                  <pre className="whitespace-pre-wrap text-sm text-slate-700">{bundle.draft_content}</pre>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
           <Card>
             <CardHeader title="メタデータ" />
             <CardContent>

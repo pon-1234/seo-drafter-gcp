@@ -122,6 +122,7 @@ class DraftBundle(BaseModel):
     quality: DraftQualitySignals
     metadata: Dict[str, str]
     internal_links: Optional[List[InternalLink]] = None
+    draft_content: Optional[str] = None
 
 
 class DraftApproveRequest(BaseModel):

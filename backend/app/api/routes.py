@@ -141,9 +141,10 @@ def get_draft(
     if not artifacts:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found")
 
-    # Read quality and links data
+    # Read quality, links, and draft content
     quality_payload = {}
     links_payload = []
+    draft_content = None
 
     for filename, full_path in artifacts.items():
         if filename == "quality.json":
@@ -161,6 +162,8 @@ def get_draft(
                     links_payload = links_data.get("suggestions", [])
                 except json.JSONDecodeError:
                     logger.warning("Links payload for %s is not valid JSON", draft_id)
+        elif filename == "draft.md":
+            draft_content = store.read_artifact(full_path)
 
     # Build paths dict and signed URLs
     paths = artifacts
@@ -178,6 +181,7 @@ def get_draft(
         draft_content=quality_payload,
         signed_urls=signed_urls or None,
         internal_links=links_payload,
+        draft_text=draft_content,
     )
 
 
