@@ -37,7 +37,16 @@ class TestDraftGenerationPipeline:
             project_id="test-project",
             prompt_version="v1.0",
             persona={"name": "テストユーザー"},
-            intent="information"
+            intent="information",
+            article_type="information",
+            cta="資料DL",
+            heading_mode="auto",
+            heading_overrides=[],
+            quality_rubric="standard",
+            reference_urls=[],
+            output_format="html",
+            notation_guidelines=None,
+            word_count_range="2000-2400",
         )
         payload = {"primary_keyword": "SEO対策"}
 
@@ -52,8 +61,25 @@ class TestDraftGenerationPipeline:
         """Test meta tag generation."""
         pipeline = DraftGenerationPipeline()
         payload = {"primary_keyword": "Python プログラミング"}
+        context = PipelineContext(
+            job_id="test-123",
+            draft_id="draft-123",
+            project_id="test-project",
+            prompt_version="v1.0",
+            persona={},
+            intent="information",
+            article_type="information",
+            cta="資料DL",
+            heading_mode="auto",
+            heading_overrides=[],
+            quality_rubric="standard",
+            reference_urls=[],
+            output_format="docs",
+            notation_guidelines=None,
+            word_count_range=None,
+        )
 
-        meta = pipeline.generate_meta(payload)
+        meta = pipeline.generate_meta(payload, context)
 
         assert "title_options" in meta
         assert "description_options" in meta
@@ -64,13 +90,36 @@ class TestDraftGenerationPipeline:
         """Test quality evaluation."""
         pipeline = DraftGenerationPipeline()
         draft = {
+            "draft": {
+                "sections": [
+                    {"paragraphs": [{"citations": []}]},
+                    {"paragraphs": [{"citations": ["https://example.com"]}]},
+                ]
+            },
             "claims": [
                 {"id": "claim-1", "text": "テキスト", "citations": []},
                 {"id": "claim-2", "text": "テキスト2", "citations": ["https://example.com"]}
             ]
         }
+        context = PipelineContext(
+            job_id="test-123",
+            draft_id="draft-123",
+            project_id="test-project",
+            prompt_version="v1.0",
+            persona={},
+            intent="information",
+            article_type="information",
+            cta=None,
+            heading_mode="auto",
+            heading_overrides=[],
+            quality_rubric="standard",
+            reference_urls=[],
+            output_format="html",
+            notation_guidelines=None,
+            word_count_range=None,
+        )
 
-        quality = pipeline.evaluate_quality(draft)
+        quality = pipeline.evaluate_quality(draft, context)
 
         assert "similarity" in quality
         assert "claims" in quality
@@ -92,7 +141,18 @@ class TestDraftGenerationPipeline:
                 "goals": ["情報収集"],
                 "pain_points": ["時間がない"],
                 "tone": "実務的"
-            }
+            },
+            "article_type": "comparison",
+            "intended_cta": "資料請求",
+            "quality_rubric": "standard",
+            "heading_directive": {
+                "mode": "manual",
+                "headings": ["リード", "要点", "CTA"]
+            },
+            "reference_urls": ["https://example.com"],
+            "output_format": "docs",
+            "notation_guidelines": "英数字は半角",
+            "word_count_range": "2000-2400"
         }
 
         result = pipeline.run(payload)
@@ -115,3 +175,4 @@ class TestDraftGenerationPipeline:
         # Verify metadata
         assert result["metadata"]["job_id"] == "test-job-123"
         assert result["metadata"]["draft_id"] == "test-draft-123"
+        assert result["metadata"]["article_type"] == "comparison"

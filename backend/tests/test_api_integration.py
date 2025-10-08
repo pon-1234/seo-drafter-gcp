@@ -19,11 +19,11 @@ class TestAPIIntegration:
         payload = {
             "prompt_id": "test-prompt",
             "version": "v1.0",
-            "templates": {
-                "system": "You are a helpful assistant",
-                "user": "Write about {keyword}"
-            },
-            "variables": ["keyword"],
+            "templates": [
+                {"layer": "system", "content": "You are a helpful assistant."},
+                {"layer": "user", "content": "Write about {keyword}."}
+            ],
+            "variables": {"keyword": "Python"},
             "description": "Test prompt"
         }
 
@@ -39,8 +39,11 @@ class TestAPIIntegration:
         payload = {
             "prompt_id": "test-prompt-2",
             "version": "v1.0",
-            "templates": {"system": "Test", "user": "Test {keyword}"},
-            "variables": ["keyword"],
+            "templates": [
+                {"layer": "system", "content": "Test"},
+                {"layer": "user", "content": "Test {keyword}"}
+            ],
+            "variables": {"keyword": "value"},
         }
         client.post("/api/prompts", json=payload)
 
@@ -55,6 +58,14 @@ class TestAPIIntegration:
         payload = {
             "primary_keyword": "Python プログラミング",
             "supporting_keywords": ["初心者", "学習"],
+            "article_type": "information",
+            "intended_cta": "資料DL",
+            "persona_brief": {
+                "job_role": "マーケティング担当",
+                "experience_years": "1-3年",
+                "needs": ["効率的な学習方法"],
+                "prohibited_expressions": ["初心者でも簡単"]
+            }
         }
 
         response = client.post("/api/persona/derive", json=payload)
@@ -69,9 +80,25 @@ class TestAPIIntegration:
             "primary_keyword": "SEO対策",
             "supporting_keywords": ["コンテンツ", "戦略"],
             "intent": "information",
-            "word_count_range": [1000, 2000],
-            "prohibited_claims": [],
-            "existing_article_ids": []
+            "word_count_range": "2000-2500",
+            "prohibited_claims": ["No medical claims"],
+            "existing_article_ids": [],
+            "article_type": "comparison",
+            "intended_cta": "問い合わせ",
+            "output_format": "html",
+            "quality_rubric": "standard",
+            "reference_urls": ["https://example.com"],
+            "notation_guidelines": "英数字は半角統一",
+            "heading_directive": {
+                "mode": "manual",
+                "headings": ["リード", "要点", "CTA"]
+            },
+            "persona_brief": {
+                "job_role": "マーケティングマネージャー",
+                "experience_years": "3-5年",
+                "needs": ["社内説得用の根拠"],
+                "prohibited_expressions": ["完全無料"]
+            }
         }
 
         response = client.post("/api/jobs", json=payload)
@@ -80,6 +107,8 @@ class TestAPIIntegration:
         assert "id" in data
         assert data["status"] in ["pending", "running"]
         assert data["payload"]["primary_keyword"] == "SEO対策"
+        assert data["payload"]["article_type"] == "comparison"
+        assert data["payload"]["heading_directive"]["mode"] == "manual"
 
     def test_get_nonexistent_draft(self):
         """Test getting a non-existent draft returns 404."""

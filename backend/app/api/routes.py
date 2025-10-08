@@ -98,6 +98,9 @@ def create_job(
         PersonaDeriveRequest(
             primary_keyword=payload.primary_keyword,
             supporting_keywords=payload.supporting_keywords,
+            article_type=payload.article_type,
+            intended_cta=payload.intended_cta,
+            persona_brief=payload.persona_brief,
         )
     )
 
@@ -112,6 +115,14 @@ def create_job(
         "prohibited_claims": payload.prohibited_claims,
         "style_guide_id": payload.style_guide_id,
         "existing_article_ids": payload.existing_article_ids,
+        "article_type": payload.article_type,
+        "intended_cta": payload.intended_cta,
+        "persona_brief": payload.persona_brief.dict() if payload.persona_brief else None,
+        "notation_guidelines": payload.notation_guidelines,
+        "heading_directive": payload.heading_directive.dict(),
+        "reference_urls": payload.reference_urls,
+        "output_format": payload.output_format,
+        "quality_rubric": payload.quality_rubric,
         "persona": persona.dict(),
     }
     execution_id = workflow.launch(job_id, launch_payload)

@@ -27,6 +27,14 @@ main:
             prohibited_claims: ${event.prohibited_claims}
             style_guide_id: ${event.style_guide_id}
             existing_article_ids: ${event.existing_article_ids}
+            article_type: ${event.article_type}
+            intended_cta: ${event.intended_cta}
+            persona_brief: ${event.persona_brief}
+            notation_guidelines: ${event.notation_guidelines}
+            heading_directive: ${event.heading_directive}
+            reference_urls: ${event.reference_urls}
+            output_format: ${event.output_format}
+            quality_rubric: ${event.quality_rubric}
           auth:
             type: OIDC
         result: workerResponse

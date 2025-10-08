@@ -18,12 +18,21 @@ class QualityEngine:
         requires_expert = draft_content.get("is_ymyl", False)
         missing_citations = [c["id"] for c in claims]
 
+        rubric_payload = draft_content.get("rubric", {}) if isinstance(draft_content, dict) else {}
+        rubric_summary = draft_content.get("rubric_summary") if isinstance(draft_content, dict) else None
+        rubric_scores = {}
+        if isinstance(rubric_payload, dict):
+            rubric_scores = {key: str(value) for key, value in rubric_payload.items() if key != "summary"}
+            rubric_summary = rubric_summary or rubric_payload.get("summary")
+
         return DraftQualitySignals(
             duplication_score=duplication_score,
             excessive_claims=[c.get("text", "") for c in claims],
             style_violations=style,
             requires_expert_review=requires_expert,
             citations_missing=missing_citations,
+            rubric_scores=rubric_scores,
+            rubric_summary=rubric_summary,
         )
 
     def bundle(

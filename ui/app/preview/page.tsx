@@ -24,6 +24,8 @@ interface DraftBundle {
     style_violations: string[];
     requires_expert_review: boolean;
     citations_missing: string[];
+    rubric_scores?: Record<string, string>;
+    rubric_summary?: string;
   };
   metadata: Record<string, string>;
   internal_links?: InternalLink[];
@@ -127,7 +129,21 @@ function PreviewPageContent() {
                 <li>重複率: {(bundle.quality.duplication_score * 100).toFixed(1)}%</li>
                 <li>要出典: {bundle.quality.citations_missing.length} 件</li>
                 <li>専門家レビュー: {bundle.quality.requires_expert_review ? '必須' : '任意'}</li>
+                {bundle.quality.rubric_summary ? (
+                  <li>Rubricサマリー: {bundle.quality.rubric_summary}</li>
+                ) : null}
               </ul>
+              {bundle.quality.rubric_scores ? (
+                <div className="mt-4 space-y-1 text-sm text-slate-700">
+                  <p className="font-semibold text-slate-800">Rubric詳細（5観点）</p>
+                  {Object.entries(bundle.quality.rubric_scores).map(([key, value]) => (
+                    <div key={key} className="flex items-center justify-between rounded-md border border-slate-200 px-3 py-2">
+                      <span className="text-slate-600">{key}</span>
+                      <span className="font-medium text-slate-900">{value}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
             </CardContent>
           </Card>
           {bundle.internal_links && bundle.internal_links.length > 0 ? (

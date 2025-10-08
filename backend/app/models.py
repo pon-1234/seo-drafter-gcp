@@ -13,6 +13,23 @@ class IntentType(str, Enum):
     transaction = "transaction"
 
 
+class ArticleType(str, Enum):
+    information = "information"
+    comparison = "comparison"
+    ranking = "ranking"
+    closing = "closing"
+
+
+class HeadingMode(str, Enum):
+    auto = "auto"
+    manual = "manual"
+
+
+class OutputFormat(str, Enum):
+    docs = "docs"
+    html = "html"
+
+
 class JobStatus(str, Enum):
     pending = "pending"
     running = "running"
@@ -58,16 +75,31 @@ class Persona(BaseModel):
     success_metrics: List[str] = Field(default_factory=list)
 
 
+class PersonaBrief(BaseModel):
+    job_role: str = Field(..., description="読者の職種")
+    experience_years: Optional[str] = Field(None, description="経験年数やシニアリティ")
+    needs: List[str] = Field(default_factory=list, description="読者の主要なニーズ")
+    prohibited_expressions: List[str] = Field(default_factory=list, description="避けるべき禁則表現")
+
+
 class PersonaDeriveRequest(BaseModel):
     primary_keyword: str
     supporting_keywords: List[str] = Field(default_factory=list)
     region: Optional[str] = None
     device: Optional[str] = None
+    article_type: Optional[ArticleType] = None
+    intended_cta: Optional[str] = None
+    persona_brief: Optional[PersonaBrief] = None
 
 
 class PersonaDeriveResponse(BaseModel):
     persona: Persona
     provenance_search_terms: List[str]
+
+
+class HeadingDirective(BaseModel):
+    mode: HeadingMode = HeadingMode.auto
+    headings: List[str] = Field(default_factory=list, description="指定する見出しのリスト (mode=manual の場合)")
 
 
 class JobCreate(BaseModel):
@@ -80,6 +112,14 @@ class JobCreate(BaseModel):
     prompt_version: Optional[str] = None
     existing_article_ids: List[str] = Field(default_factory=list)
     persona_override: Optional[Persona] = None
+    article_type: ArticleType = ArticleType.information
+    persona_brief: Optional[PersonaBrief] = None
+    intended_cta: Optional[str] = None
+    notation_guidelines: Optional[str] = None
+    heading_directive: HeadingDirective = Field(default_factory=HeadingDirective)
+    reference_urls: List[str] = Field(default_factory=list)
+    output_format: OutputFormat = OutputFormat.html
+    quality_rubric: Optional[str] = None
 
 
 class Job(BaseModel):
@@ -98,6 +138,8 @@ class DraftQualitySignals(BaseModel):
     style_violations: List[str]
     requires_expert_review: bool
     citations_missing: List[str]
+    rubric_scores: Dict[str, str] = Field(default_factory=dict)
+    rubric_summary: Optional[str] = None
 
 
 class DraftPersistenceRequest(BaseModel):
