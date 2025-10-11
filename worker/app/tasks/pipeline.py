@@ -60,18 +60,25 @@ class DraftGenerationPipeline:
         if self.ai_provider == "openai":
             try:
                 if OpenAIGateway:
+                    logger.info("Initializing OpenAI with API key: %s..., model: %s",
+                               self.settings.openai_api_key[:20] if self.settings.openai_api_key else "None",
+                               self.settings.openai_model)
                     self.ai_gateway = OpenAIGateway(
                         api_key=self.settings.openai_api_key,
                         model=self.settings.openai_model,
                     )
-                    logger.info("Using OpenAI as AI provider (model: %s)", self.settings.openai_model)
+                    logger.info("Successfully initialized OpenAI as AI provider (model: %s)", self.settings.openai_model)
                 else:
-                    raise ImportError("OpenAIGateway not available")
+                    raise ImportError("OpenAIGateway class not available")
             except Exception as e:
-                logger.warning("OpenAI initialization failed: %s, falling back to Vertex", e)
+                logger.error("OpenAI initialization failed: %s (type: %s), falling back to Vertex", str(e), type(e).__name__)
+                import traceback
+                logger.error("Full traceback: %s", traceback.format_exc())
                 self.ai_gateway = VertexGateway() if VertexGateway else None
                 if self.ai_gateway:
-                    logger.info("Fallback to Vertex AI")
+                    logger.info("Successfully fell back to Vertex AI")
+                else:
+                    logger.error("No AI gateway available - both OpenAI and Vertex failed")
         else:
             self.ai_gateway = VertexGateway() if VertexGateway else None
             if self.ai_gateway:
