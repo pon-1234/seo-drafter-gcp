@@ -4,7 +4,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 try:  # pragma: no cover - optional dependency
     import sys
@@ -354,30 +354,44 @@ class DraftGenerationPipeline:
         sections = []
         all_claims = []
 
+        def build_paragraph(heading_text: str, level: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+            prompt = self._build_section_prompt(heading_text, context)
+            grounded_result = self._generate_grounded_content(prompt)
+            claim_id = f"{context.draft_id}-{heading_text}"
+            if level == "h2":
+                claim_id = f"{context.draft_id}-{level}-{heading_text}"
+            source_candidates = grounded_result.get("citations") or citations[:2]
+            if not source_candidates and context.reference_urls:
+                source_candidates = [{"url": url} for url in context.reference_urls[:2]]
+            citation_values = [c.get("uri") or c.get("url") or str(c) for c in source_candidates]
+            raw_text = grounded_result.get("text")
+            normalized_text = raw_text.strip() if isinstance(raw_text, str) else ""
+            paragraph_text = normalized_text or f"{heading_text} について解説します。"
+
+            paragraph_payload = {
+                "heading": heading_text,
+                "text": paragraph_text,
+                "citations": citation_values,
+                "claim_id": claim_id,
+            }
+            claim_payload = {
+                "id": claim_id,
+                "text": normalized_text or paragraph_text,
+                "citations": grounded_result.get("citations", []),
+            }
+            return paragraph_payload, claim_payload
+
         for h2 in outline.get("h2", []):
             paragraphs = []
             for h3 in h2.get("h3", []):
-                # Use Vertex AI with Grounding for content generation
-                prompt = self._build_section_prompt(h3["text"], context)
-                grounded_result = self._generate_grounded_content(prompt)
+                paragraph, claim = build_paragraph(h3["text"], "h3")
+                paragraphs.append(paragraph)
+                all_claims.append(claim)
 
-                claim_id = f"{context.draft_id}-{h3['text']}"
-                source_candidates = grounded_result.get("citations") or citations[:2]
-                if not source_candidates and context.reference_urls:
-                    source_candidates = [{"url": url} for url in context.reference_urls[:2]]
-                citation_values = [c.get("uri") or c.get("url") or str(c) for c in source_candidates]
-                paragraphs.append({
-                    "heading": h3["text"],
-                    "text": grounded_result.get("text", f"{h3['text']} について解説します。"),
-                    "citations": citation_values,
-                    "claim_id": claim_id,
-                })
-
-                all_claims.append({
-                    "id": claim_id,
-                    "text": grounded_result.get("text", ""),
-                    "citations": grounded_result.get("citations", []),
-                })
+            if not paragraphs:
+                paragraph, claim = build_paragraph(h2["text"], "h2")
+                paragraphs.append(paragraph)
+                all_claims.append(claim)
 
             sections.append({"h2": h2["text"], "paragraphs": paragraphs})
 
@@ -430,9 +444,12 @@ class DraftGenerationPipeline:
         for pain in pain_points[:3]:
             prompt = f"{persona_name}が抱える「{pain}」という課題に対する解決策を簡潔に説明してください。"
             result = self._generate_grounded_content(prompt)
+            raw_answer = result.get("text")
+            normalized_answer = raw_answer.strip() if isinstance(raw_answer, str) else ""
+            answer_text = normalized_answer or "課題に対する実務的な解決策を提示します。"
             faq_items.append({
                 "question": pain,
-                "answer": result.get("text", "解決策を提供します。"),
+                "answer": answer_text,
                 "citations": result.get("citations", []),
             })
 
