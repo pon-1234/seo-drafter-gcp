@@ -192,11 +192,28 @@ def get_draft(
     draft_id: str,
     store: DraftStorage = Depends(get_storage),
     quality: QualityEngine = Depends(get_quality_engine),
+    firestore_repo: FirestoreRepository = Depends(get_firestore),
 ) -> DraftBundle:
     import json
 
     # List artifacts from GCS or local store
     artifacts = store.list_artifacts(draft_id)
+
+    # If not found, try to find the job and use job_id as fallback
+    # (older drafts may be stored by job_id instead of draft_id)
+    if not artifacts:
+        try:
+            # Try to find job where draft_id matches
+            jobs = firestore_repo.list_jobs(limit=100)
+            matching_job = next((j for j in jobs if j.draft_id == draft_id), None)
+            if matching_job:
+                # Try with job_id
+                artifacts = store.list_artifacts(matching_job.id)
+                if artifacts:
+                    logger.info("Found draft using job_id %s for draft_id %s", matching_job.id, draft_id)
+        except Exception as e:
+            logger.warning("Failed to lookup job for draft_id %s: %s", draft_id, e)
+
     if not artifacts:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found")
 
