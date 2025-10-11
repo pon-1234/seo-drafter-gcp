@@ -13,6 +13,11 @@ class Settings(BaseSettings):
     default_prompt_version: str = Field("v1", env="DEFAULT_PROMPT_VERSION")
     seed: int = Field(42, env="GENERATION_SEED")
 
+    # AI Provider Configuration
+    ai_provider: str = Field("openai", env="AI_PROVIDER")  # "openai" or "vertex"
+    openai_api_key: Optional[str] = Field(None, env="OPENAI_API_KEY")
+    openai_model: str = Field("gpt-4o", env="OPENAI_MODEL")
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

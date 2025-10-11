@@ -15,9 +15,11 @@ try:  # pragma: no cover - optional dependency
         sys.path.insert(0, backend_path)
     from app.services.bigquery import InternalLinkRepository
     from app.services.vertex import VertexGateway
+    from app.services.openai_gateway import OpenAIGateway
 except ImportError:
     InternalLinkRepository = None  # type: ignore
     VertexGateway = None  # type: ignore
+    OpenAIGateway = None  # type: ignore
 
 from ..core.config import get_settings
 
@@ -46,9 +48,31 @@ class PipelineContext:
 class DraftGenerationPipeline:
     """Encapsulates the deterministic order of the draft generation steps."""
 
-    def __init__(self) -> None:
+    def __init__(self, ai_provider: Optional[str] = None) -> None:
         self.settings = get_settings()
-        self.vertex_gateway = VertexGateway() if VertexGateway else None
+        self.ai_provider = ai_provider or self.settings.ai_provider
+
+        # Initialize AI gateway based on provider
+        if self.ai_provider == "openai":
+            try:
+                if OpenAIGateway:
+                    self.ai_gateway = OpenAIGateway(
+                        api_key=self.settings.openai_api_key,
+                        model=self.settings.openai_model,
+                    )
+                    logger.info("Using OpenAI as AI provider (model: %s)", self.settings.openai_model)
+                else:
+                    raise ImportError("OpenAIGateway not available")
+            except Exception as e:
+                logger.warning("OpenAI initialization failed: %s, falling back to Vertex", e)
+                self.ai_gateway = VertexGateway() if VertexGateway else None
+                if self.ai_gateway:
+                    logger.info("Fallback to Vertex AI")
+        else:
+            self.ai_gateway = VertexGateway() if VertexGateway else None
+            if self.ai_gateway:
+                logger.info("Using Vertex AI as AI provider")
+
         self.link_repository = InternalLinkRepository() if InternalLinkRepository else None
 
     def estimate_intent(self, payload: Dict) -> str:
@@ -424,16 +448,18 @@ class DraftGenerationPipeline:
         )
 
     def _generate_grounded_content(self, prompt: str) -> Dict[str, Any]:
-        """Generate content with Google Search Grounding."""
-        if not self.vertex_gateway:
-            logger.warning("Vertex Gateway not available, using fallback")
-            return {"text": prompt[:100] + "...", "citations": []}
+        """Generate content with AI provider (OpenAI or Vertex AI)."""
+        if not self.ai_gateway:
+            logger.error("AI Gateway not available - cannot generate content")
+            raise RuntimeError("AI Gateway is not initialized. Please configure OPENAI_API_KEY or GCP credentials.")
 
         try:
-            return self.vertex_gateway.generate_with_grounding(prompt, temperature=0.7)
+            result = self.ai_gateway.generate_with_grounding(prompt, temperature=0.7)
+            logger.info("Generated content: %d characters", len(result.get("text", "")))
+            return result
         except Exception as e:
-            logger.error("Grounded generation failed: %s", e)
-            return {"text": prompt[:100] + "...", "citations": []}
+            logger.error("Content generation failed: %s", e)
+            raise
 
     def _generate_faq(self, context: PipelineContext) -> List[Dict]:
         """Generate FAQ section using Vertex AI."""

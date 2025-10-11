@@ -7,6 +7,11 @@ const sections = [
     href: '/brief'
   },
   {
+    title: '生成記事一覧',
+    description: 'これまでに生成した記事の一覧を確認し、プレビューや品質チェックを実行。',
+    href: '/drafts'
+  },
+  {
     title: 'プロンプト管理',
     description: 'System / Developer / User テンプレートを編集し、バージョン固定で保存。',
     href: '/prompts'

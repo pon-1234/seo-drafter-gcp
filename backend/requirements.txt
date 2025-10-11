@@ -5,3 +5,4 @@ google-cloud-firestore>=2.14.0
 google-cloud-storage>=2.14.0
 google-cloud-workflows>=1.11.0
 google-cloud-aiplatform>=1.51.0
+openai>=1.0.0

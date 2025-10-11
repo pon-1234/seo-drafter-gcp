@@ -11,6 +11,8 @@ from ..models import (
     APIError,
     DraftApproveRequest,
     DraftBundle,
+    DraftListItem,
+    DraftListResponse,
     DraftPersistenceRequest,
     Job,
     JobCreate,
@@ -26,6 +28,11 @@ from ..services.quality import QualityEngine
 from ..services.vertex import VertexGateway
 from ..services.workflow import WorkflowLauncher
 
+try:
+    from ..services.openai_gateway import OpenAIGateway
+except ImportError:
+    OpenAIGateway = None  # type: ignore
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -33,6 +40,20 @@ router = APIRouter()
 
 def get_firestore() -> FirestoreRepository:
     return FirestoreRepository()
+
+
+def get_ai_gateway():
+    """Get AI gateway based on configuration."""
+    settings = get_settings()
+    if settings.ai_provider == "openai" and OpenAIGateway:
+        try:
+            return OpenAIGateway(
+                api_key=settings.openai_api_key,
+                model=settings.openai_model,
+            )
+        except Exception as e:
+            logger.warning("OpenAI initialization failed: %s, falling back to Vertex", e)
+    return VertexGateway()
 
 
 def get_vertex() -> VertexGateway:
@@ -75,9 +96,9 @@ def get_prompt_version(
 @router.post("/api/persona/derive", response_model=PersonaDeriveResponse)
 def derive_persona(
     payload: PersonaDeriveRequest,
-    vertex: VertexGateway = Depends(get_vertex),
+    ai_gateway=Depends(get_ai_gateway),
 ) -> PersonaDeriveResponse:
-    persona = vertex.generate_persona(payload)
+    persona = ai_gateway.generate_persona(payload)
     search_terms = [payload.primary_keyword, *payload.supporting_keywords]
     return PersonaDeriveResponse(persona=persona, provenance_search_terms=search_terms)
 
@@ -87,14 +108,14 @@ def create_job(
     payload: JobCreate,
     store: FirestoreRepository = Depends(get_firestore),
     workflow: WorkflowLauncher = Depends(get_workflow),
-    vertex: VertexGateway = Depends(get_vertex),
+    ai_gateway=Depends(get_ai_gateway),
 ) -> Job:
     job_id = str(uuid.uuid4())
     draft_id = str(uuid.uuid4())
     logger.info("Creating job %s", job_id)
     job = store.create_job(job_id, payload, draft_id=draft_id)
 
-    persona = payload.persona_override or vertex.generate_persona(
+    persona = payload.persona_override or ai_gateway.generate_persona(
         PersonaDeriveRequest(
             primary_keyword=payload.primary_keyword,
             supporting_keywords=payload.supporting_keywords,
@@ -137,6 +158,33 @@ def get_job(job_id: str, store: FirestoreRepository = Depends(get_firestore)) ->
     if not job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
     return job
+
+
+@router.get("/api/drafts", response_model=DraftListResponse)
+def list_drafts(
+    limit: int = 50,
+    store: FirestoreRepository = Depends(get_firestore),
+) -> DraftListResponse:
+    """List all drafts ordered by creation time."""
+    jobs = store.list_jobs(limit=limit)
+    draft_items = []
+
+    for job in jobs:
+        if not job.draft_id:
+            continue
+
+        draft_item = DraftListItem(
+            draft_id=job.draft_id,
+            job_id=job.id,
+            status=job.status.value if hasattr(job.status, 'value') else str(job.status),
+            created_at=job.created_at.isoformat() if job.created_at else None,
+            article_type=job.payload.article_type if job.payload else None,
+            primary_keyword=job.payload.primary_keyword if job.payload else None,
+            title=f"{job.payload.primary_keyword} {job.payload.article_type}ガイド" if job.payload else None,
+        )
+        draft_items.append(draft_item)
+
+    return DraftListResponse(drafts=draft_items, total=len(draft_items))
 
 
 @router.get("/api/drafts/{draft_id}", response_model=DraftBundle, responses={404: {"model": APIError}})

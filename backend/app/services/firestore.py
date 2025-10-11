@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 try:  # pragma: no cover - optional dependency
     from google.api_core import exceptions as gcloud_exceptions  # type: ignore
@@ -83,6 +83,26 @@ class FirestoreRepository:
                 return None
             return Job(**snapshot.to_dict())
         return self._jobs.get(job_id)
+
+    def list_jobs(self, limit: int = 50, order_by: str = "created_at") -> List[Job]:
+        """List jobs ordered by creation time (newest first)."""
+        jobs = []
+        if self._client:
+            collection = self._client.collection("jobs" if not self._namespace else f"{self._namespace}/jobs")
+            query = collection.order_by(order_by, direction=firestore.Query.DESCENDING).limit(limit)
+            try:
+                for doc in query.stream():
+                    jobs.append(Job(**doc.to_dict()))
+            except Exception as e:
+                logger.error("Error listing jobs: %s", e)
+        else:
+            # In-memory fallback
+            jobs = sorted(
+                self._jobs.values(),
+                key=lambda j: j.created_at if j.created_at else datetime.min,
+                reverse=True
+            )[:limit]
+        return jobs
 
     # Prompt versions
     def create_prompt_version(self, data: PromptVersionCreate) -> PromptVersion:

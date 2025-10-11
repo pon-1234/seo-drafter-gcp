@@ -172,6 +172,23 @@ class DraftApproveRequest(BaseModel):
     notes: Optional[str] = None
 
 
+class DraftListItem(BaseModel):
+    """Summary of a draft for list view."""
+    draft_id: str
+    job_id: str
+    status: str
+    created_at: Optional[str] = None
+    title: Optional[str] = None
+    article_type: Optional[str] = None
+    primary_keyword: Optional[str] = None
+
+
+class DraftListResponse(BaseModel):
+    """Response containing list of drafts."""
+    drafts: List[DraftListItem]
+    total: int
+
+
 class APIError(BaseModel):
     message: str
     detail: Optional[str] = None
