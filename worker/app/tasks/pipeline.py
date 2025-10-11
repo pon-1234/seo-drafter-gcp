@@ -15,10 +15,14 @@ try:  # pragma: no cover - optional dependency
         sys.path.insert(0, backend_path)
     from app.services.bigquery import InternalLinkRepository
     from app.services.vertex import VertexGateway
-    from app.services.openai_gateway import OpenAIGateway
 except ImportError:
     InternalLinkRepository = None  # type: ignore
     VertexGateway = None  # type: ignore
+
+# OpenAI Gateway is now local to worker
+try:
+    from ..services.openai_gateway import OpenAIGateway
+except ImportError:
     OpenAIGateway = None  # type: ignore
 
 from ..core.config import get_settings
