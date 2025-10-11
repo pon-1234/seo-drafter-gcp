@@ -116,11 +116,8 @@ export default function DraftsListPage() {
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-500">{formatDate(draft.created_at)}</td>
                   <td className="px-6 py-4 text-sm">
-                    <Link href={'/preview?draft_id=' + draft.draft_id} className="text-indigo-600 hover:text-indigo-900 mr-4">
+                    <Link href={'/preview?draft_id=' + draft.draft_id} className="text-indigo-600 hover:text-indigo-900">
                       プレビュー
-                    </Link>
-                    <Link href={'/quality?draft_id=' + draft.draft_id} className="text-gray-600 hover:text-gray-900">
-                      品質チェック
                     </Link>
                   </td>
                 </tr>

@@ -23,17 +23,14 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               <a href="/drafts" className="hover:text-primary">
                 生成記事一覧
               </a>
+              <a href="/preview" className="hover:text-primary">
+                プレビュー
+              </a>
               <a href="/prompts" className="hover:text-primary">
                 プロンプト管理
               </a>
               <a href="/persona" className="hover:text-primary">
                 ペルソナスタジオ
-              </a>
-              <a href="/preview" className="hover:text-primary">
-                生成プレビュー
-              </a>
-              <a href="/quality" className="hover:text-primary">
-                品質チェック
               </a>
             </nav>
           </header>

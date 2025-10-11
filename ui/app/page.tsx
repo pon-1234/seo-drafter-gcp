@@ -8,8 +8,13 @@ const sections = [
   },
   {
     title: '生成記事一覧',
-    description: 'これまでに生成した記事の一覧を確認し、プレビューや品質チェックを実行。',
+    description: 'これまでに生成した記事の一覧を確認し、プレビューを実行。',
     href: '/drafts'
+  },
+  {
+    title: 'プレビュー',
+    description: 'アウトライン・本文ドラフト・FAQ・Meta・品質指標を確認。',
+    href: '/preview'
   },
   {
     title: 'プロンプト管理',
@@ -20,16 +25,6 @@ const sections = [
     title: 'ペルソナスタジオ',
     description: '自動生成されたペルソナJSONを確認し、上書き・ロックします。',
     href: '/persona'
-  },
-  {
-    title: '生成プレビュー',
-    description: 'アウトライン・本文ドラフト・FAQ・Meta・根拠URLを確認。',
-    href: '/preview'
-  },
-  {
-    title: '品質チェック',
-    description: '重複率、過剰主張、YMYLフラグ、スタイル差分をレビュー。',
-    href: '/quality'
   }
 ];
 
