@@ -13,10 +13,15 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <body className="min-h-screen">
         <div className="mx-auto flex min-h-screen max-w-6xl flex-col gap-8 px-6 py-8">
           <header className="flex items-center justify-between">
-            <h1 className="text-2xl font-semibold text-primary">SEO Drafter</h1>
+            <h1 className="text-2xl font-semibold text-primary">
+              <a href="/">SEO Drafter</a>
+            </h1>
             <nav className="flex gap-4 text-sm text-slate-600">
               <a href="/brief" className="hover:text-primary">
                 記事作成依頼
+              </a>
+              <a href="/drafts" className="hover:text-primary">
+                生成記事一覧
               </a>
               <a href="/prompts" className="hover:text-primary">
                 プロンプト管理
