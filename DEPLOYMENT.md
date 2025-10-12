@@ -57,24 +57,7 @@ Terraformは以下をデプロイします:
 - Cloud Tasksキュー
 - サービスアカウントとIAMバインディング
 
-## Step 2: BigQuery Embedding Modelの作成
-
-```bash
-# BigQuery から Vertex AI textembedding-gecko@003 を参照するリモートモデルを作成
-bq query --use_legacy_sql=false "
-CREATE OR REPLACE MODEL `seo-drafter-gcp.seo_drafter.embedding_model`
-OPTIONS(
-  model_type = 'VERTEX_MODEL',
-  remote_model_id = 'projects/${PROJECT_NUMBER}/locations/us-central1/publishers/google/models/textembedding-gecko@003'
-);
-"
-```
-
-> **Note**
-> `${PROJECT_NUMBER}` は Vertex AI を有効化した GCP プロジェクト番号に置き換えてください。
-> 利用可能なモデルとロケーションは Vertex AI モデルリファレンス(https://cloud.google.com/vertex-ai/docs/generative-ai/model-reference/text-embeddings)を確認してください。
-
-## Step 3: 環境変数の設定
+## Step 2: 環境変数の設定
 
 各サービスの `.env.example` をコピーして `.env` を作成し、必要に応じて編集します:
 
@@ -89,15 +72,15 @@ cp worker/.env.example worker/.env
 cp ui/.env.example ui/.env
 ```
 
-## Step 4: サービスのデプロイ
+## Step 3: サービスのデプロイ
 
-### 4.1 全サービスを一括デプロイ
+### 3.1 全サービスを一括デプロイ
 
 ```bash
 ./scripts/deploy.sh
 ```
 
-### 4.2 個別サービスのデプロイ
+### 3.2 個別サービスのデプロイ
 
 ```bash
 # Backendのみ
@@ -242,7 +225,7 @@ gcloud builds triggers create github \
 - Cloud Runの最小インスタンス数を0に設定 (デフォルト)
 - GCSライフサイクルポリシーで古いドラフトを自動削除 (90日)
 - BigQueryのパーティショニングとクラスタリングを活用
-- Vertex AI呼び出しのキャッシュを実装
+- OpenAI 呼び出しのキャッシュを実装
 
 ## セキュリティ
 
@@ -262,7 +245,7 @@ gcloud builds triggers create github \
 アラートの設定:
 - Cloud Runのエラー率が5%を超えた場合
 - BigQueryクエリのレイテンシが10秒を超えた場合
-- Vertex AI API呼び出しの失敗率が高い場合
+- OpenAI API呼び出しの失敗率が高い場合
 
 ## 次のステップ
 

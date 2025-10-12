@@ -25,7 +25,6 @@ from ..models import (
 from ..services.firestore import FirestoreRepository
 from ..services.gcs import DraftStorage
 from ..services.quality import QualityEngine
-from ..services.vertex import VertexGateway
 from ..services.workflow import WorkflowLauncher
 
 try:
@@ -43,21 +42,27 @@ def get_firestore() -> FirestoreRepository:
 
 
 def get_ai_gateway():
-    """Get AI gateway based on configuration."""
+    """Instantiate the OpenAI gateway or raise if unavailable."""
+    if not OpenAIGateway:
+        logger.error("OpenAI gateway implementation is not available")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="OpenAI support is not available",
+        )
+
     settings = get_settings()
-    if settings.ai_provider == "openai" and OpenAIGateway:
-        try:
-            return OpenAIGateway(
-                api_key=settings.openai_api_key,
-                model=settings.openai_model,
-            )
-        except Exception as e:
-            logger.warning("OpenAI initialization failed: %s, falling back to Vertex", e)
-    return VertexGateway()
 
-
-def get_vertex() -> VertexGateway:
-    return VertexGateway()
+    try:
+        return OpenAIGateway(
+            api_key=settings.openai_api_key,
+            model=settings.openai_model,
+        )
+    except Exception as exc:
+        logger.error("OpenAI initialization failed: %s (type: %s)", str(exc), type(exc).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="OpenAI initialization failed. Check configuration.",
+        )
 
 
 def get_storage() -> DraftStorage:
@@ -138,13 +143,13 @@ def create_job(
         "existing_article_ids": payload.existing_article_ids,
         "article_type": payload.article_type,
         "intended_cta": payload.intended_cta,
-        "persona_brief": payload.persona_brief.dict() if payload.persona_brief else None,
+        "persona_brief": payload.persona_brief.model_dump() if payload.persona_brief else None,
         "notation_guidelines": payload.notation_guidelines,
-        "heading_directive": payload.heading_directive.dict(),
+        "heading_directive": payload.heading_directive.model_dump(),
         "reference_urls": payload.reference_urls,
         "output_format": payload.output_format,
         "quality_rubric": payload.quality_rubric,
-        "persona": persona.dict(),
+        "persona": persona.model_dump(),
     }
     execution_id = workflow.launch(job_id, launch_payload)
     if execution_id:
@@ -313,8 +318,9 @@ def persist_draft(
 
 
 def _render_markdown(draft: dict) -> str:
-    sections = draft.get("sections", [])
-    faq_items = draft.get("faq", [])
+    payload = draft.get("draft") if "draft" in draft and isinstance(draft.get("draft"), dict) else draft
+    sections = payload.get("sections", []) if isinstance(payload, dict) else []
+    faq_items = payload.get("faq", []) if isinstance(payload, dict) else []
     lines = ["# 生成ドラフト"]
     for section in sections:
         lines.append(f"## {section.get('h2', '')}")

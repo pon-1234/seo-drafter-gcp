@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import os
+import json
+import re
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -14,6 +16,8 @@ try:
 except ImportError:
     OPENAI_AVAILABLE = False
     logger.warning("openai package not installed")
+
+from ..models import ArticleType, Persona, PersonaBrief, PersonaDeriveRequest
 
 
 class OpenAIGateway:
@@ -43,8 +47,39 @@ class OpenAIGateway:
         if not self.api_key:
             raise ValueError("OpenAI API key is required. Set OPENAI_API_KEY environment variable.")
 
-        self.client = OpenAI(api_key=self.api_key)
-        logger.info("OpenAI Gateway initialized with model: %s", self.model)
+        proxy_cleared = self._clear_proxy_env()
+
+        # Simplified initialization to avoid compatibility issues with proxy kwargs
+        try:
+            self.client = OpenAI(api_key=self.api_key)
+            if proxy_cleared:
+                logger.info("OpenAI Gateway initialized with model: %s (proxy env cleared)", self.model)
+            else:
+                logger.info("OpenAI Gateway initialized with model: %s", self.model)
+        except Exception as exc:
+            logger.exception("Failed to initialize OpenAI client: %s", exc)
+            raise
+
+    @staticmethod
+    def _clear_proxy_env() -> bool:
+        """Remove proxy-related environment variables that break the OpenAI SDK."""
+        proxy_keys = [
+            "OPENAI_PROXY",
+            "OPENAI_HTTP_PROXY",
+            "OPENAI_HTTPS_PROXY",
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "ALL_PROXY",
+            "all_proxy",
+        ]
+        removed = False
+        for key in proxy_keys:
+            if os.environ.pop(key, None) is not None:
+                logger.info("Removing proxy env var: %s", key)
+                removed = True
+        return removed
 
     def generate_with_grounding(
         self,
@@ -78,9 +113,9 @@ class OpenAIGateway:
 
             # Use web search if enabled and model supports it
             if self.search_enabled and self.model in ["gpt-4o", "gpt-4-turbo"]:
-                # For models that support tools, we can enhance with search
-                # Note: OpenAI doesn't have built-in web search like Vertex AI
-                # We'll generate content and extract potential sources from the response
+                # For models that support tools, we can enhance with search-like instructions
+                # OpenAI's API does not provide built-in web search, so we coax citations via prompting
+                # and post-process the response for potential references.
                 logger.info("Generating content with search-aware prompt")
                 messages[0]["content"] += (
                     "\n実際の最新情報に基づいて回答してください。"
@@ -151,60 +186,158 @@ class OpenAIGateway:
 
         return content
 
-    def generate_persona(
-        self,
-        industry: str,
-        goals: List[str],
-        pain_points: List[str],
-        tone: str = "実務的",
-    ) -> Dict[str, Any]:
-        """
-        Generate a persona description using OpenAI.
+    def generate_persona(self, request: "PersonaDeriveRequest") -> "Persona":  # type: ignore[name-defined]
+        """Generate a Persona model from a PersonaDeriveRequest."""
+        if not isinstance(request, PersonaDeriveRequest):
+            raise TypeError("generate_persona expects PersonaDeriveRequest")
 
-        Args:
-            industry: Target industry
-            goals: List of persona goals
-            pain_points: List of pain points
-            tone: Desired tone
+        brief: PersonaBrief = request.persona_brief or PersonaBrief(
+            job_role="検討者", needs=[], prohibited_expressions=[]
+        )
 
-        Returns:
-            Persona dictionary
-        """
+        # Build a structured JSON prompt for OpenAI.
+        supporting = ", ".join(request.supporting_keywords) or "特になし"
+        prohibited = ", ".join(brief.prohibited_expressions) or "特になし"
+        needs = ", ".join(brief.needs) or "明確な情報整理と意思決定のための根拠"
+        tone = "実務的で信頼性を重視"
+        intent_map = {
+            ArticleType.information: "information",
+            ArticleType.comparison: "comparison",
+            ArticleType.ranking: "comparison",
+            ArticleType.closing: "transaction",
+        }
+        search_intent = intent_map.get(request.article_type or ArticleType.information, "information")
+
         prompt = f"""
-以下の情報に基づいて、SEO記事のターゲットペルソナを生成してください。
+以下の条件で B2B マーケティング向けのペルソナ情報を JSON1行で出力してください。
 
-業界: {industry}
-目標: {', '.join(goals)}
-課題: {', '.join(pain_points)}
-トーン: {tone}
+- 主キーワード: {request.primary_keyword}
+- 補助キーワード: {supporting}
+- 読者の職種: {brief.job_role}
+- 読者の課題/ニーズ: {needs}
+- 想定CTA: {request.intended_cta or '意思決定を促す行動'}
+- 禁則表現: {prohibited}
+- 想定トーン: {tone}
 
-以下の形式でペルソナを出力してください：
-- 名前: [典型的な役職名]
-- 特徴: [2-3文で特徴を説明]
-- 情報ニーズ: [求めている情報の種類]
+出力フォーマット (JSON):
+{{
+  "name": string,
+  "job_to_be_done": string,
+  "pain_points": [string],
+  "goals": [string],
+  "reading_level": string,
+  "tone": string,
+  "search_intent": string,
+  "success_metrics": [string]
+}}
 """
 
+        persona_payload: Optional[Dict[str, Any]] = None
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "あなたはマーケティングペルソナの専門家です。"},
-                    {"role": "user", "content": prompt}
+                    {"role": "system", "content": "あなたはB2Bマーケティングのペルソナ設計の専門家です。JSONのみで回答してください。"},
+                    {"role": "user", "content": prompt},
                 ],
-                temperature=0.7,
+                temperature=0.3,
                 max_tokens=500,
             )
-
             content = response.choices[0].message.content or ""
+            persona_payload = self._extract_persona_json(content)
+        except Exception as exc:
+            logger.exception("Persona generation request failed: %s", exc)
 
-            return {
-                "name": industry + "の検討者",
-                "goals": goals,
-                "pain_points": pain_points,
-                "tone": tone,
-                "description": content,
+        return self._build_persona_from_payload(
+            request=request,
+            brief=brief,
+            inferred_intent=search_intent,
+            payload=persona_payload,
+        )
+
+    def _extract_persona_json(self, content: str) -> Optional[Dict[str, Any]]:
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            match = re.search(r"\{.*\}", content, flags=re.S)
+            if match:
+                try:
+                    return json.loads(match.group())
+                except json.JSONDecodeError:
+                    logger.debug("Failed to parse persona JSON from extracted chunk")
+        logger.debug("Unable to parse persona JSON from OpenAI response")
+        return None
+
+    def _build_persona_from_payload(
+        self,
+        *,
+        request: "PersonaDeriveRequest",
+        brief: "PersonaBrief",
+        inferred_intent: str,
+        payload: Optional[Dict[str, Any]],
+    ) -> "Persona":  # type: ignore[name-defined]
+        from ..models import Persona
+
+        default_name = f"{brief.job_role}向け{request.primary_keyword}検討者"
+        default_goals = [
+            request.intended_cta or "信頼できる情報を基に次のアクションを決めたい",
+            f"{request.primary_keyword}の要点を短時間で理解したい",
+        ]
+        default_pain = brief.needs or ["必要な情報が散在している", "意思決定の根拠が不足している"]
+        default_success = ["CTA達成率", "資料請求数"]
+
+        if payload:
+            name = (payload.get("name") or default_name).strip()
+            job_to_be_done = (payload.get("job_to_be_done") or request.intended_cta or default_goals[0]).strip()
+            goals = self._ensure_list(payload.get("goals"), default_goals)
+            pain_points = self._ensure_list(payload.get("pain_points"), default_pain)
+            reading_level = (payload.get("reading_level") or "中級").strip()
+            tone = (payload.get("tone") or "実務的").strip()
+            search_intent = self._coerce_intent(payload.get("search_intent"), inferred_intent)
+            success_metrics = self._ensure_list(payload.get("success_metrics"), default_success)
+        else:
+            name = default_name
+            job_to_be_done = request.intended_cta or default_goals[0]
+            goals = default_goals
+            pain_points = default_pain
+            reading_level = "中級"
+            tone = "実務的"
+            search_intent = inferred_intent
+            success_metrics = default_success
+
+        persona = Persona(
+            name=name,
+            job_to_be_done=job_to_be_done,
+            pain_points=pain_points,
+            goals=goals,
+            reading_level=reading_level,
+            tone=tone,
+            search_intent=search_intent,
+            success_metrics=success_metrics,
+        )
+        return persona
+
+    @staticmethod
+    def _ensure_list(value: Any, default: List[str]) -> List[str]:
+        if isinstance(value, list) and value:
+            return [str(item).strip() for item in value if str(item).strip()]
+        if isinstance(value, str) and value.strip():
+            return [value.strip()]
+        return default
+
+    @staticmethod
+    def _coerce_intent(value: Any, fallback: str) -> str:
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            mapping = {
+                'info': 'information',
+                'informational': 'information',
+                'information': 'information',
+                'compare': 'comparison',
+                'comparison': 'comparison',
+                'transactional': 'transaction',
+                'transaction': 'transaction',
             }
-
-        except Exception as e:
-            logger.error("Persona generation failed: %s", e)
-            raise
+            if normalized in mapping:
+                return mapping[normalized]
+        return fallback

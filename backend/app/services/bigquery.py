@@ -5,10 +5,8 @@ from typing import Any, Dict, List, Optional
 
 try:  # pragma: no cover - optional dependency
     from google.cloud import bigquery  # type: ignore
-    from google.cloud import aiplatform  # type: ignore
 except ImportError:  # pragma: no cover - local fallback
     bigquery = None
-    aiplatform = None
 
 from ..core.config import get_settings
 
@@ -21,8 +19,6 @@ class InternalLinkRepository:
     def __init__(self) -> None:
         self._settings = get_settings()
         self._client = bigquery.Client(project=self._settings.project_id) if bigquery else None
-        if aiplatform:
-            aiplatform.init(project=self._settings.project_id)
 
     def search(self, keyword: str, persona_goals: List[str], limit: int = 5) -> List[Dict]:
         if not self._client:
@@ -48,12 +44,12 @@ class InternalLinkRepository:
         return self._text_search(keyword, limit)
 
     def _vector_search(self, keyword: str, persona_goals: List[str], limit: int) -> List[Dict]:
-        """Perform vector similarity search using Vertex AI embeddings and BigQuery."""
+        """Perform vector similarity search using stored embeddings."""
         if not self._client:
             return []
 
-        # For now, use text-based search since BigQuery ML embeddings are not available
-        # TODO: Implement Vertex AI Matching Engine or Vector Search when available
+        # For now, use text-based search since vector search is not yet implemented
+        # TODO: Implement a real vector search backend when available
         logger.info("Vector search not yet configured, using text search fallback")
         return []
 
@@ -112,7 +108,7 @@ class InternalLinkRepository:
             logger.warning("BigQuery client unavailable; skipping embedding storage")
             return False
 
-        # Generate embedding using Vertex AI
+        # Generate embeddings using a BigQuery ML remote model
         # This would typically be done in a batch job
         insert_query = f"""
         INSERT INTO `{self._settings.project_id}.seo_drafter.article_embeddings`

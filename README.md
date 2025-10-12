@@ -1,6 +1,6 @@
 # SEO Drafter GCP
 
-Google Cloud を用いて SEO 記事の調査〜構成〜草案生成を自動化する MVP の実装スケルトン。Cloud Run (UI/API/Worker)・Cloud Workflows・Firestore・Cloud Storage・BigQuery・Vertex AI を中心に構成しています。
+Google Cloud を用いて SEO 記事の調査〜構成〜草案生成を自動化する MVP の実装スケルトン。Cloud Run (UI/API/Worker)・Cloud Workflows・Firestore・Cloud Storage・BigQuery・OpenAI を中心に構成しています。
 
 ## モノレポ構成
 
@@ -15,7 +15,7 @@ shared/    # 共有ユーティリティ配置予定
 ## バックエンド (FastAPI)
 - `POST /api/jobs` で UI からジョブを作成し、Cloud Workflows の実行をトリガー。
 - `POST /api/prompts` / `GET /api/prompts/{id}` でテンプレートをバージョン管理。
-- `POST /api/persona/derive` で Vertex AI を経由したペルソナ自動生成。
+- `POST /api/persona/derive` で OpenAI を経由したペルソナ自動生成。
 - `POST /internal/drafts` は Workflow → Worker → API の内部連携用エンドポイント。生成物を GCS に保存し、品質判定を実施し、Firestore のステータスを更新。
 - `GET /api/drafts/{id}`, `POST /api/drafts/{id}/approve` で UI からプレビュー/承認操作。
 
@@ -32,7 +32,7 @@ uvicorn app.main:app --reload --port 8080
 ## Worker (Draft Generation Pipeline)
 - `POST /run-pipeline` で Cloud Workflows から呼び出される想定。
 - 意図推定 → アウトライン生成 → 本文ドラフト生成 → FAQ/Meta/リンク案 → 品質評価までをシングルプロセスで実行する雛形を実装。
-- 将来的には各ステップを Cloud Tasks 分割し、BigQuery Vector Search / Vertex AI Google Search Grounding を組み込みます。
+- 将来的には各ステップを Cloud Tasks 分割し、BigQuery Vector Search / 外部検索連携を組み込みます。
 
 ### 起動
 
@@ -102,9 +102,9 @@ projects/{pid}/drafts/{draftId}
 
 ## 実装済み機能
 
-### Vertex AI Grounding
-- `backend/app/services/vertex.py` で Google Search Grounding を使用した引用付きコンテンツ生成
-- `worker/app/tasks/pipeline.py` でセクション生成時に Grounding を適用
+### OpenAI ドラフト生成
+- `backend/app/services/openai_gateway.py` / `worker/app/services/openai_gateway.py` で OpenAI のチャット補完 API を利用
+- `worker/app/tasks/pipeline.py` は Grounding 風のプロンプト設計と後処理で引用情報を抽出
 
 ### BigQuery Vector Search
 - `backend/app/services/bigquery.py` で記事の埋め込みベクトル検索
@@ -118,7 +118,6 @@ projects/{pid}/drafts/{draftId}
 
 ### テスト
 - Backend API の統合テスト (`backend/tests/test_api_integration.py`)
-- Vertex AI サービスの単体テスト (`backend/tests/test_vertex.py`)
 - BigQuery サービスの単体テスト (`backend/tests/test_bigquery.py`)
 - Worker パイプラインのエンドツーエンドテスト (`worker/tests/test_pipeline.py`)
 
@@ -133,4 +132,3 @@ projects/{pid}/drafts/{draftId}
 - FastAPI / Next.js / Worker いずれもローカル動作時はダミークライアントで代替し、GCP SDK が未インストールでも破綻しないよう調整。
 - JSON 出力の一貫性を確保するため `Default Prompt Version` と `seed` を env で固定。
 - YMYL 自動判定や要出典タグは `worker/app/tasks/pipeline.py` → `QualityEngine` の流れでマーキング。
-

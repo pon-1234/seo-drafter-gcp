@@ -4,14 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-SEO Drafter GCP is a monorepo implementing an MVP for automated SEO article research, outline generation, and draft creation using Google Cloud Platform services. The system orchestrates UI (Next.js), API/Backend (FastAPI), Worker (FastAPI), Cloud Workflows, Firestore, Cloud Storage, BigQuery, and Vertex AI.
+SEO Drafter GCP is a monorepo implementing an MVP for automated SEO article research, outline generation, and draft creation using Google Cloud Platform services. The system orchestrates UI (Next.js), API/Backend (FastAPI), Worker (FastAPI), Cloud Workflows, Firestore, Cloud Storage, BigQuery, and OpenAI.
 
 ## Architecture
 
 This is a microservices architecture with the following components:
 
 - **UI (Next.js)**: Cloud Run service providing brief input forms, prompt management, persona studio, preview, and quality check pages
-- **Backend (FastAPI)**: Cloud Run API service handling job creation, prompt versioning, persona generation, and draft management. Integrates with Firestore, GCS, Workflows, and Vertex AI
+- **Backend (FastAPI)**: Cloud Run API service handling job creation, prompt versioning, persona generation, and draft management. Integrates with Firestore, GCS, Workflows, and OpenAI
 - **Worker (FastAPI)**: Cloud Run service executing the draft generation pipeline (intent estimation → outline → draft → FAQ/Meta/Links → quality evaluation)
 - **Cloud Workflows**: Orchestrates the pipeline by calling Worker then Backend's internal endpoint in sequence
 
@@ -28,7 +28,7 @@ This is a microservices architecture with the following components:
 - **FirestoreRepository** (`backend/app/services/firestore.py`): Manages jobs, prompts, and drafts with in-memory fallback for local development
 - **DraftStorage** (`backend/app/services/gcs.py`): Handles GCS artifact storage (outline.json, draft.md, meta.json, quality.json)
 - **QualityEngine** (`backend/app/services/quality.py`): Performs YMYL detection, citation validation, style checks
-- **VertexGateway** (`backend/app/services/vertex.py`): Interfaces with Vertex AI for persona generation and content grounding
+- **OpenAIGateway** (`backend/app/services/openai_gateway.py` / `worker/app/services/openai_gateway.py`): Interfaces with OpenAI for persona generation and content generation
 - **DraftGenerationPipeline** (`worker/app/tasks/pipeline.py`): Executes the sequential draft generation steps
 
 ## Development Commands
@@ -65,7 +65,7 @@ npm start          # Production server
 ## Testing
 
 ```bash
-# Backend tests (includes API integration, Vertex AI, BigQuery)
+# Backend tests (includes API integration, BigQuery)
 cd backend && pytest tests/
 
 # Worker tests (includes pipeline end-to-end tests)
@@ -131,11 +131,10 @@ For detailed deployment instructions, see [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Implemented Features
 
-### Vertex AI Google Search Grounding
-- **Location**: `backend/app/services/vertex.py` - `generate_with_grounding()` method
-- Generates content with automatic citation from Google Search results
-- Used in Worker pipeline for section and FAQ generation
-- Returns text with grounding metadata and citation URIs
+### OpenAI Draft Generation
+- **Location**: `backend/app/services/openai_gateway.py` / `worker/app/services/openai_gateway.py`
+- Generates content and personas through OpenAI's Chat Completions API
+- Worker pipeline enriches prompts to encourage grounded responses and extracts citations post-generation
 
 ### BigQuery Vector Search
 - **Location**: `backend/app/services/bigquery.py` - `InternalLinkRepository` class
@@ -165,7 +164,6 @@ For detailed deployment instructions, see [DEPLOYMENT.md](DEPLOYMENT.md).
 ### Testing
 - **Backend Tests**:
   - `backend/tests/test_api_integration.py` - Full API endpoint coverage
-  - `backend/tests/test_vertex.py` - Vertex AI service unit tests
   - `backend/tests/test_bigquery.py` - BigQuery repository tests
 - **Worker Tests**:
   - `worker/tests/test_pipeline.py` - End-to-end pipeline tests

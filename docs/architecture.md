@@ -13,7 +13,7 @@
    - `/api/jobs` → Workflow 実行 → Worker → API `/internal/drafts` の直列処理。
    - 失敗時は Cloud Tasks による遅延リトライを将来的に挿入。
 4. **Worker (Cloud Run / FastAPI)**
-   - Vertex AI + Google Search Grounding → Draft/FAQ/Meta/リンク案生成。
+   - OpenAI の Chat Completions API を用いた Draft/FAQ/Meta/リンク案生成。
    - BigQuery Vector Search で内部リンク候補を抽出（スタブ実装）。
    - 品質信号を同梱して API に返却。
 
@@ -44,4 +44,3 @@ graph LR
 ## 監査ログ
 - `POST /api/jobs` 時に使用モデル・seed・プロンプトバージョンを Firestore に保存 (スタブ)。
 - Draft 承認時に `POST /api/drafts/{id}/approve` で承認ユーザーとノートを保持。
-

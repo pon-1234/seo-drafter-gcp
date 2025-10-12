@@ -43,8 +43,39 @@ class OpenAIGateway:
         if not self.api_key:
             raise ValueError("OpenAI API key is required. Set OPENAI_API_KEY environment variable.")
 
-        self.client = OpenAI(api_key=self.api_key)
-        logger.info("OpenAI Gateway initialized with model: %s", self.model)
+        proxy_cleared = self._clear_proxy_env()
+
+        # Simplified initialization to avoid compatibility issues with proxy kwargs
+        try:
+            self.client = OpenAI(api_key=self.api_key)
+            if proxy_cleared:
+                logger.info("OpenAI Gateway initialized with model: %s (proxy env cleared)", self.model)
+            else:
+                logger.info("OpenAI Gateway initialized with model: %s", self.model)
+        except Exception as exc:
+            logger.exception("Failed to initialize OpenAI client: %s", exc)
+            raise
+
+    @staticmethod
+    def _clear_proxy_env() -> bool:
+        """Remove proxy-related environment variables that break the OpenAI SDK."""
+        proxy_keys = [
+            "OPENAI_PROXY",
+            "OPENAI_HTTP_PROXY",
+            "OPENAI_HTTPS_PROXY",
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "ALL_PROXY",
+            "all_proxy",
+        ]
+        removed = False
+        for key in proxy_keys:
+            if os.environ.pop(key, None) is not None:
+                logger.info("Removing proxy env var: %s", key)
+                removed = True
+        return removed
 
     def generate_with_grounding(
         self,
@@ -78,9 +109,9 @@ class OpenAIGateway:
 
             # Use web search if enabled and model supports it
             if self.search_enabled and self.model in ["gpt-4o", "gpt-4-turbo"]:
-                # For models that support tools, we can enhance with search
-                # Note: OpenAI doesn't have built-in web search like Vertex AI
-                # We'll generate content and extract potential sources from the response
+                # For models that support tools, we can enhance with search-like instructions
+                # OpenAI's API does not provide built-in web search, so we coax citations via prompting
+                # and post-process the response for potential references.
                 logger.info("Generating content with search-aware prompt")
                 messages[0]["content"] += (
                     "\n実際の最新情報に基づいて回答してください。"

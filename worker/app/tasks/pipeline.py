@@ -14,10 +14,8 @@ try:  # pragma: no cover - optional dependency
     if backend_path not in sys.path:
         sys.path.insert(0, backend_path)
     from app.services.bigquery import InternalLinkRepository
-    from app.services.vertex import VertexGateway
 except ImportError:
     InternalLinkRepository = None  # type: ignore
-    VertexGateway = None  # type: ignore
 
 # OpenAI Gateway is now local to worker
 try:
@@ -52,37 +50,29 @@ class PipelineContext:
 class DraftGenerationPipeline:
     """Encapsulates the deterministic order of the draft generation steps."""
 
-    def __init__(self, ai_provider: Optional[str] = None) -> None:
+    def __init__(self) -> None:
         self.settings = get_settings()
-        self.ai_provider = ai_provider or self.settings.ai_provider
+        self.ai_gateway = None
 
-        # Initialize AI gateway based on provider
-        if self.ai_provider == "openai":
-            try:
-                if OpenAIGateway:
-                    logger.info("Initializing OpenAI with API key: %s..., model: %s",
-                               self.settings.openai_api_key[:20] if self.settings.openai_api_key else "None",
-                               self.settings.openai_model)
-                    self.ai_gateway = OpenAIGateway(
-                        api_key=self.settings.openai_api_key,
-                        model=self.settings.openai_model,
-                    )
-                    logger.info("Successfully initialized OpenAI as AI provider (model: %s)", self.settings.openai_model)
-                else:
-                    raise ImportError("OpenAIGateway class not available")
-            except Exception as e:
-                logger.error("OpenAI initialization failed: %s (type: %s), falling back to Vertex", str(e), type(e).__name__)
-                import traceback
-                logger.error("Full traceback: %s", traceback.format_exc())
-                self.ai_gateway = VertexGateway() if VertexGateway else None
-                if self.ai_gateway:
-                    logger.info("Successfully fell back to Vertex AI")
-                else:
-                    logger.error("No AI gateway available - both OpenAI and Vertex failed")
+        if not OpenAIGateway:
+            logger.error("OpenAI gateway implementation is not available")
         else:
-            self.ai_gateway = VertexGateway() if VertexGateway else None
-            if self.ai_gateway:
-                logger.info("Using Vertex AI as AI provider")
+            try:
+                logger.info(
+                    "Initializing OpenAI with API key: %s..., model: %s",
+                    self.settings.openai_api_key[:20] if self.settings.openai_api_key else "None",
+                    self.settings.openai_model,
+                )
+                self.ai_gateway = OpenAIGateway(
+                    api_key=self.settings.openai_api_key,
+                    model=self.settings.openai_model,
+                )
+                logger.info("Successfully initialized OpenAI gateway (model: %s)", self.settings.openai_model)
+            except Exception as exc:
+                logger.error("OpenAI initialization failed: %s (type: %s)", str(exc), type(exc).__name__)
+                import traceback
+
+                logger.error("Full traceback: %s", traceback.format_exc())
 
         self.link_repository = InternalLinkRepository() if InternalLinkRepository else None
 
@@ -459,7 +449,7 @@ class DraftGenerationPipeline:
         )
 
     def _generate_grounded_content(self, prompt: str) -> Dict[str, Any]:
-        """Generate content with AI provider (OpenAI or Vertex AI)."""
+        """Generate content with the configured OpenAI gateway."""
         if not self.ai_gateway:
             logger.error("AI Gateway not available - cannot generate content")
             raise RuntimeError("AI Gateway is not initialized. Please configure OPENAI_API_KEY or GCP credentials.")
@@ -473,7 +463,7 @@ class DraftGenerationPipeline:
             raise
 
     def _generate_faq(self, context: PipelineContext) -> List[Dict]:
-        """Generate FAQ section using Vertex AI."""
+        """Generate FAQ section using the OpenAI gateway."""
         persona_name = context.persona.get("name", "読者")
         pain_points = context.persona.get("pain_points", [])
 

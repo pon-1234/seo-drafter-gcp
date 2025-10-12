@@ -52,7 +52,7 @@ class FirestoreRepository:
         )
         if self._client:
             doc_ref = self._client.document(self._doc_path("jobs", job_id))
-            doc_ref.set(job.dict())
+            doc_ref.set(job.model_dump())
         else:
             self._jobs[job_id] = job
         return job
@@ -61,13 +61,13 @@ class FirestoreRepository:
         current = self.get_job(job_id)
         if not current:
             return None
-        data = current.dict()
+        data = current.model_dump()
         data.update(updates)
         data["updated_at"] = datetime.utcnow()
         job = Job(**data)
         if self._client:
             doc_ref = self._client.document(self._doc_path("jobs", job_id))
-            doc_ref.set(job.dict())
+            doc_ref.set(job.model_dump())
         else:
             self._jobs[job_id] = job
         return job
@@ -117,7 +117,7 @@ class FirestoreRepository:
 
         if self._client:
             doc_ref = self._client.document(self._doc_path("prompts", data.prompt_id))
-            doc_ref.set({"versions": {data.version: entry.dict()}}, merge=True)
+            doc_ref.set({"versions": {data.version: entry.model_dump()}}, merge=True)
         return entry
 
     def get_prompt_version(self, prompt_id: str, version: Optional[str]) -> Optional[PromptVersion]:

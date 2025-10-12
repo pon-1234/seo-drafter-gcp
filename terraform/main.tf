@@ -19,7 +19,6 @@ resource "google_project_service" "required_apis" {
     "run.googleapis.com",
     "firestore.googleapis.com",
     "storage.googleapis.com",
-    "aiplatform.googleapis.com",
     "workflows.googleapis.com",
     "cloudtasks.googleapis.com",
     "pubsub.googleapis.com",
@@ -234,12 +233,6 @@ resource "google_project_iam_member" "api_storage" {
   member  = "serviceAccount:${google_service_account.api.email}"
 }
 
-resource "google_project_iam_member" "api_vertex" {
-  project = var.project_id
-  role    = "roles/aiplatform.user"
-  member  = "serviceAccount:${google_service_account.api.email}"
-}
-
 resource "google_project_iam_member" "api_workflows" {
   project = var.project_id
   role    = "roles/workflows.invoker"
@@ -274,12 +267,6 @@ resource "google_project_iam_member" "worker_firestore" {
 resource "google_project_iam_member" "worker_storage" {
   project = var.project_id
   role    = "roles/storage.objectAdmin"
-  member  = "serviceAccount:${google_service_account.worker.email}"
-}
-
-resource "google_project_iam_member" "worker_vertex" {
-  project = var.project_id
-  role    = "roles/aiplatform.user"
   member  = "serviceAccount:${google_service_account.worker.email}"
 }
 

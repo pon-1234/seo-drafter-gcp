@@ -1,26 +1,26 @@
 from functools import lru_cache
 from typing import Optional
 
-from pydantic import BaseSettings, Field
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    project_id: str = Field("local-dev", env="GCP_PROJECT")
-    region: str = Field("asia-northeast1", env="GCP_REGION")
-    drafts_bucket: str = Field("seo-drafter-dev", env="DRAFTS_BUCKET")
-    embedding_model: str = Field("text-embedding-004", env="EMBEDDING_MODEL")
-    prompts_bucket: Optional[str] = Field(None, env="PROMPTS_BUCKET")
-    default_prompt_version: str = Field("v1", env="DEFAULT_PROMPT_VERSION")
-    seed: int = Field(42, env="GENERATION_SEED")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8"
+    )
 
-    # AI Provider Configuration
-    ai_provider: str = Field("openai", env="AI_PROVIDER")  # "openai" or "vertex"
-    openai_api_key: Optional[str] = Field(None, env="OPENAI_API_KEY")
-    openai_model: str = Field("gpt-4o", env="OPENAI_MODEL")
+    project_id: str = Field(default="local-dev", alias="GCP_PROJECT")
+    region: str = Field(default="asia-northeast1", alias="GCP_REGION")
+    drafts_bucket: str = Field(default="seo-drafter-dev", alias="DRAFTS_BUCKET")
+    embedding_model: str = Field(default="text-embedding-004", alias="EMBEDDING_MODEL")
+    prompts_bucket: Optional[str] = Field(default=None, alias="PROMPTS_BUCKET")
+    default_prompt_version: str = Field(default="v1", alias="DEFAULT_PROMPT_VERSION")
+    seed: int = Field(default=42, alias="GENERATION_SEED")
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
+    openai_model: str = Field(default="gpt-4o", alias="OPENAI_MODEL")
 
 
 @lru_cache

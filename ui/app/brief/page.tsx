@@ -11,6 +11,15 @@ type ArticleType = 'information' | 'comparison' | 'ranking' | 'closing';
 type OutputFormat = 'docs' | 'html';
 type HeadingMode = 'auto' | 'manual';
 
+const Label = ({ text, required = false }: { text: string; required?: boolean }) => (
+  <label className="text-sm font-medium text-slate-700">
+    {text}
+    <span className="ml-2 inline-flex items-center rounded-full border border-slate-200 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-slate-500">
+      {required ? '必須' : '任意'}
+    </span>
+  </label>
+);
+
 export default function BriefPage() {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -85,7 +94,7 @@ export default function BriefPage() {
       setHeadingMode('auto');
     } catch (error) {
       console.error(error);
-      setStatus('ジョブ作成に失敗しました。バックエンド設定を確認してください。');
+      setStatus('ジョブ作成に失敗しました。入力内容とバックエンド設定を確認してください。');
     } finally {
       setLoading(false);
     }
@@ -93,18 +102,21 @@ export default function BriefPage() {
 
   return (
     <Card>
-      <CardHeader title="記事作成依頼フォーム" description="生成に必要な情報を入力し、Cloud Workflows にジョブを登録します。" />
+      <CardHeader
+        title="記事作成依頼フォーム"
+        description="ラベルに「必須」とある項目はすべて入力してください。送信するとプロンプトとペルソナ設定に値が転記され、Cloud Workflows で生成ジョブが開始されます。"
+      />
       <form onSubmit={onSubmit}>
         <CardContent className="space-y-8">
           <section className="space-y-4">
             <h3 className="text-sm font-semibold text-slate-900">基本情報</h3>
             <div className="grid gap-4 md:grid-cols-2">
               <div>
-                <label className="text-sm font-medium text-slate-700">主キーワード</label>
+                <Label text="主キーワード" required />
                 <Input name="primary_keyword" placeholder="例: デジタルマーケティング とは" required />
               </div>
               <div>
-                <label className="text-sm font-medium text-slate-700">記事タイプ</label>
+                <Label text="記事タイプ" required />
                 <select
                   name="article_type"
                   className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -120,7 +132,7 @@ export default function BriefPage() {
             </div>
             <div className="grid gap-4 md:grid-cols-3">
               <div>
-                <label className="text-sm font-medium text-slate-700">検索意図タイプ</label>
+                <Label text="検索意図タイプ" />
                 <select
                   name="intent"
                   className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -134,11 +146,11 @@ export default function BriefPage() {
                 </select>
               </div>
               <div>
-                <label className="text-sm font-medium text-slate-700">推奨文字数レンジ</label>
+                <Label text="推奨文字数レンジ" />
                 <Input name="word_count_range" placeholder="例: 2000-2400" />
               </div>
               <div>
-                <label className="text-sm font-medium text-slate-700">出力形式</label>
+                <Label text="出力形式" required />
                 <select
                   name="output_format"
                   className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -155,7 +167,7 @@ export default function BriefPage() {
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               <div>
-                <label className="text-sm font-medium text-slate-700">品質チェックRubric</label>
+                <Label text="品質チェックRubric" required />
                 <select
                   name="quality_rubric"
                   className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -170,7 +182,7 @@ export default function BriefPage() {
                 </select>
               </div>
               <div>
-                <label className="text-sm font-medium text-slate-700">目的・CTA</label>
+                <Label text="目的・CTA" />
                 <Input name="intended_cta" placeholder="例: 資料DL / 相談フォーム" />
               </div>
             </div>
@@ -180,21 +192,21 @@ export default function BriefPage() {
             <h3 className="text-sm font-semibold text-slate-900">読者ペルソナ</h3>
             <div className="grid gap-4 md:grid-cols-2">
               <div>
-                <label className="text-sm font-medium text-slate-700">職種</label>
+                <Label text="職種" required />
                 <Input name="persona_job_role" placeholder="例: B2Bマーケティング担当" required />
               </div>
               <div>
-                <label className="text-sm font-medium text-slate-700">経験年数</label>
+                <Label text="経験年数" />
                 <Input name="persona_experience_years" placeholder="例: 3-5年" />
               </div>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               <div>
-                <label className="text-sm font-medium text-slate-700">主なニーズ</label>
+                <Label text="主なニーズ" required />
                 <Textarea name="persona_needs" rows={4} placeholder="1行につき1ニーズを記載" required />
               </div>
               <div>
-                <label className="text-sm font-medium text-slate-700">禁則表現</label>
+                <Label text="禁則表現" />
                 <Textarea name="persona_prohibited_expressions" rows={4} placeholder="1行につき1つのNGワード/表現" />
               </div>
             </div>
@@ -204,36 +216,36 @@ export default function BriefPage() {
             <h3 className="text-sm font-semibold text-slate-900">ガイドライン</h3>
             <div className="grid gap-4 md:grid-cols-2">
               <div>
-                <label className="text-sm font-medium text-slate-700">サブキーワード</label>
+                <Label text="サブキーワード" />
                 <Textarea name="supporting_keywords" rows={3} placeholder="カンマまたは改行区切り" />
               </div>
               <div>
-                <label className="text-sm font-medium text-slate-700">既存関連記事ID</label>
+                <Label text="既存関連記事ID" />
                 <Textarea name="existing_article_ids" rows={3} placeholder="改行区切りで入力" />
               </div>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               <div>
-                <label className="text-sm font-medium text-slate-700">参考URL / 競合例</label>
+                <Label text="参考URL / 競合例" />
                 <Textarea name="reference_urls" rows={3} placeholder="https://example.com を改行区切りで入力" />
               </div>
               <div>
-                <label className="text-sm font-medium text-slate-700">禁止ワード</label>
+                <Label text="禁止ワード" />
                 <Textarea name="forbidden_words" rows={3} placeholder="全角/半角や固有名詞の指定などを1行ずつ" />
               </div>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               <div>
-                <label className="text-sm font-medium text-slate-700">表記ルール</label>
+                <Label text="表記ルール" />
                 <Textarea name="notation_guidelines" rows={3} placeholder="例: 英数字は半角、固有名詞は正式表記で統一" />
               </div>
               <div>
-                <label className="text-sm font-medium text-slate-700">スタイルガイド ID</label>
+                <Label text="スタイルガイド ID" />
                 <Input name="style_guide_id" placeholder="style-guide-default" />
               </div>
             </div>
             <div>
-              <label className="text-sm font-medium text-slate-700">利用するプロンプトバージョン</label>
+              <Label text="利用するプロンプトバージョン" />
               <Input name="prompt_version" placeholder="v1" />
             </div>
           </section>
@@ -242,7 +254,7 @@ export default function BriefPage() {
             <h3 className="text-sm font-semibold text-slate-900">見出し構成</h3>
             <div className="grid gap-4 md:grid-cols-2">
               <div>
-                <label className="text-sm font-medium text-slate-700">見出し生成</label>
+                <Label text="見出し生成" />
                 <select
                   name="heading_mode"
                   className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -261,7 +273,7 @@ export default function BriefPage() {
             </div>
             {headingMode === 'manual' ? (
               <div>
-                <label className="text-sm font-medium text-slate-700">見出しテンプレート</label>
+                <Label text="見出しテンプレート" required />
                 <Textarea
                   name="heading_overrides"
                   rows={6}

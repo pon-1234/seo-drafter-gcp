@@ -86,7 +86,7 @@ export default function PersonaPage() {
       <Card>
         <CardHeader
           title="ペルソナ自動生成"
-          description="キーワードに基づき Vertex AI から初期ペルソナを生成します。"
+          description="キーワードに基づき OpenAI から初期ペルソナを生成します。"
         />
         <CardContent className="space-y-4">
           <div>

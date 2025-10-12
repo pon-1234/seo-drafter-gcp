@@ -1,12 +1,10 @@
 # OpenAI API Integration Setup
 
-This guide explains how to configure the SEO Drafter to use OpenAI API instead of Vertex AI.
+This guide explains how to configure the SEO Drafter to use the OpenAI API.
 
 ## Overview
 
-The system now supports two AI providers:
-- **OpenAI** (default): Uses GPT-4o for content generation
-- **Vertex AI**: Uses Gemini models for content generation
+The system now standardizes on OpenAI for all AI-powered features.
 
 ## Configuration
 
@@ -15,7 +13,6 @@ The system now supports two AI providers:
 Set these environment variables in your Cloud Run services or local `.env` file:
 
 ```bash
-AI_PROVIDER=openai
 OPENAI_API_KEY=your-openai-api-key
 OPENAI_MODEL=gpt-4o  # or gpt-4-turbo, gpt-3.5-turbo
 ```
@@ -47,12 +44,12 @@ Set environment variables for deployed services:
 # Worker service
 gcloud run services update seo-drafter-worker \
   --region=asia-northeast1 \
-  --set-env-vars="OPENAI_API_KEY=sk-proj-...,AI_PROVIDER=openai"
+  --set-env-vars="OPENAI_API_KEY=sk-proj-..."
 
 # Backend service
 gcloud run services update seo-drafter-api \
   --region=asia-northeast1 \
-  --set-env-vars="OPENAI_API_KEY=sk-proj-...,AI_PROVIDER=openai"
+  --set-env-vars="OPENAI_API_KEY=sk-proj-..."
 ```
 
 ## Features
@@ -66,25 +63,12 @@ gcloud run services update seo-drafter-api \
 - Creates target persona descriptions
 - Used in both backend and worker services
 
-### Fallback Behavior
-- If OpenAI initialization fails, automatically falls back to Vertex AI
-- Graceful error handling with detailed logging
-
 ## API Usage
 
 The OpenAI gateway (`backend/app/services/openai_gateway.py`) provides:
 
 - `generate_with_grounding()`: Generate content with citation extraction
 - `generate_persona()`: Generate persona descriptions
-
-## Switching Between Providers
-
-To switch back to Vertex AI:
-```bash
-AI_PROVIDER=vertex
-```
-
-Or remove the `AI_PROVIDER` environment variable to use OpenAI (default).
 
 ## Troubleshooting
 
@@ -105,7 +89,6 @@ pip install -r requirements.txt
 OpenAI has rate limits. If you hit limits:
 - Upgrade your OpenAI plan
 - Add retry logic (future enhancement)
-- Switch to Vertex AI temporarily
 
 ## Cost Considerations
 
