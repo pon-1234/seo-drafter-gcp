@@ -79,7 +79,9 @@ class OpenAIGateway:
 
     def generate_with_grounding(
         self,
-        prompt: str,
+        prompt: Optional[str] = None,
+        *,
+        messages: Optional[List[Dict[str, Any]]] = None,
         temperature: float = 0.7,
         max_tokens: Optional[int] = 1500,
     ) -> Dict[str, Any]:
@@ -87,7 +89,8 @@ class OpenAIGateway:
         Generate content using OpenAI API.
 
         Args:
-            prompt: The generation prompt
+            prompt: The generation prompt for simple use cases
+            messages: Full chat messages for layered prompting
             temperature: Sampling temperature (0.0-2.0)
             max_tokens: Maximum tokens to generate
 
@@ -95,17 +98,27 @@ class OpenAIGateway:
             Dict with 'text' and 'citations' keys
         """
         try:
-            messages = [
-                {
-                    "role": "system",
-                    "content": (
-                        "あなたはSEO記事を執筆する専門のライターです。"
-                        "正確で信頼性の高い情報を提供し、必要に応じて出典を明記してください。"
-                        "日本語で自然で読みやすい文章を書いてください。"
-                    )
-                },
-                {"role": "user", "content": prompt}
-            ]
+            if messages:
+                message_payload: List[Dict[str, Any]] = []
+                for entry in messages:
+                    role = entry.get("role", "user")
+                    if role not in {"system", "user", "assistant", "tool"}:
+                        role = "system" if role == "developer" else "user"
+                    message_payload.append({"role": role, "content": entry.get("content", "")})
+            else:
+                if not prompt:
+                    raise ValueError("Either prompt or messages must be provided.")
+                message_payload = [
+                    {
+                        "role": "system",
+                        "content": (
+                            "あなたはSEO記事を執筆する専門のライターです。"
+                            "正確で信頼性の高い情報を提供し、必要に応じて出典を明記してください。"
+                            "日本語で自然で読みやすい文章を書いてください。"
+                        )
+                    },
+                    {"role": "user", "content": prompt}
+                ]
 
             # Use web search if enabled and model supports it
             if self.search_enabled and self.model in ["gpt-4o", "gpt-4-turbo"]:
@@ -113,14 +126,17 @@ class OpenAIGateway:
                 # OpenAI's API does not provide built-in web search, so we coax citations via prompting
                 # and post-process the response for potential references.
                 logger.info("Generating content with search-aware prompt")
-                messages[0]["content"] += (
-                    "\n実際の最新情報に基づいて回答してください。"
-                    "統計データや事実を述べる際は、出典を [Source: URL] 形式で記載してください。"
-                )
+                for entry in message_payload:
+                    if entry["role"] == "system":
+                        entry["content"] += (
+                            "\n実際の最新情報に基づいて回答してください。"
+                            "統計データや事実を述べる際は、出典を [Source: URL] 形式で記載してください。"
+                        )
+                        break
 
             response = self.client.chat.completions.create(
                 model=self.model,
-                messages=messages,
+                messages=message_payload,
                 temperature=temperature,
                 max_tokens=max_tokens,
             )

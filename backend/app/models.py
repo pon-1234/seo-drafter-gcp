@@ -75,6 +75,15 @@ class Persona(BaseModel):
     success_metrics: List[str] = Field(default_factory=list)
 
 
+class WriterPersona(BaseModel):
+    name: str
+    role: Optional[str] = None
+    expertise: Optional[str] = None
+    voice: Optional[str] = None
+    qualities: List[str] = Field(default_factory=list)
+    mission: Optional[str] = None
+
+
 class PersonaBrief(BaseModel):
     job_role: str = Field(..., description="読者の職種")
     experience_years: Optional[str] = Field(None, description="経験年数やシニアリティ")
@@ -120,6 +129,10 @@ class JobCreate(BaseModel):
     reference_urls: List[str] = Field(default_factory=list)
     output_format: OutputFormat = OutputFormat.html
     quality_rubric: Optional[str] = None
+    writer_persona: Optional[WriterPersona] = None
+    preferred_sources: List[str] = Field(default_factory=list)
+    reference_media: List[str] = Field(default_factory=list)
+    project_template_id: Optional[str] = None
 
 
 class Job(BaseModel):

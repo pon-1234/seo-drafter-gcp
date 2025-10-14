@@ -36,6 +36,7 @@ class TestDraftGenerationPipeline:
             draft_id="draft-123",
             project_id="test-project",
             prompt_version="v1.0",
+            primary_keyword="SEO対策",
             persona={"name": "テストユーザー"},
             intent="information",
             article_type="information",
@@ -47,6 +48,11 @@ class TestDraftGenerationPipeline:
             output_format="html",
             notation_guidelines=None,
             word_count_range="2000-2400",
+            writer_persona={},
+            preferred_sources=[],
+            reference_media=[],
+            project_template_id=None,
+            prompt_layers={},
         )
         payload = {"primary_keyword": "SEO対策"}
 
@@ -66,6 +72,7 @@ class TestDraftGenerationPipeline:
             draft_id="draft-123",
             project_id="test-project",
             prompt_version="v1.0",
+            primary_keyword="Python プログラミング",
             persona={},
             intent="information",
             article_type="information",
@@ -77,6 +84,11 @@ class TestDraftGenerationPipeline:
             output_format="docs",
             notation_guidelines=None,
             word_count_range=None,
+            writer_persona={},
+            preferred_sources=[],
+            reference_media=[],
+            project_template_id=None,
+            prompt_layers={},
         )
 
         meta = pipeline.generate_meta(payload, context)
@@ -106,6 +118,7 @@ class TestDraftGenerationPipeline:
             draft_id="draft-123",
             project_id="test-project",
             prompt_version="v1.0",
+            primary_keyword="テストキーワード",
             persona={},
             intent="information",
             article_type="information",
@@ -117,6 +130,11 @@ class TestDraftGenerationPipeline:
             output_format="html",
             notation_guidelines=None,
             word_count_range=None,
+            writer_persona={},
+            preferred_sources=[],
+            reference_media=[],
+            project_template_id=None,
+            prompt_layers={},
         )
 
         quality = pipeline.evaluate_quality(draft, context)
@@ -154,6 +172,14 @@ class TestDraftGenerationPipeline:
             "notation_guidelines": "英数字は半角",
             "word_count_range": "2000-2400"
         }
+
+        def stub_generate(*args, **kwargs):
+            return {
+                "text": "セクション本文のダミーです。\n顧客便益: 行動につながります。",
+                "citations": [{"url": "https://example.com"}],
+            }
+
+        pipeline._generate_grounded_content = stub_generate  # type: ignore[assignment]
 
         result = pipeline.run(payload)
 

@@ -21,11 +21,13 @@ from ..models import (
     PersonaDeriveResponse,
     PromptVersion,
     PromptVersionCreate,
+    WriterPersona,
 )
 from ..services.firestore import FirestoreRepository
 from ..services.gcs import DraftStorage
 from ..services.quality import QualityEngine
 from ..services.workflow import WorkflowLauncher
+from ..services.project_settings import load_project_settings
 
 try:
     from ..services.openai_gateway import OpenAIGateway
@@ -118,7 +120,28 @@ def create_job(
     job_id = str(uuid.uuid4())
     draft_id = str(uuid.uuid4())
     logger.info("Creating job %s", job_id)
-    job = store.create_job(job_id, payload, draft_id=draft_id)
+
+    settings = get_settings()
+    project_defaults = load_project_settings(settings.project_id)
+
+    default_writer_payload = project_defaults.get("writer_persona", {})
+    writer_persona = payload.writer_persona or (
+        WriterPersona(**default_writer_payload) if default_writer_payload else None
+    )
+    preferred_sources = payload.preferred_sources or project_defaults.get("preferred_sources", [])
+    reference_media = payload.reference_media or project_defaults.get("reference_media", [])
+
+    resolved_payload_dict = payload.model_dump()
+    if writer_persona:
+        resolved_payload_dict["writer_persona"] = writer_persona.model_dump()
+    else:
+        resolved_payload_dict["writer_persona"] = None
+    resolved_payload_dict["preferred_sources"] = preferred_sources
+    resolved_payload_dict["reference_media"] = reference_media
+
+    resolved_payload = JobCreate(**resolved_payload_dict)
+
+    job = store.create_job(job_id, resolved_payload, draft_id=draft_id)
 
     persona = payload.persona_override or ai_gateway.generate_persona(
         PersonaDeriveRequest(
@@ -132,7 +155,7 @@ def create_job(
 
     launch_payload = {
         "job_id": job_id,
-        "project_id": get_settings().project_id,
+        "project_id": settings.project_id,
         "prompt_version": payload.prompt_version or get_settings().default_prompt_version,
         "primary_keyword": payload.primary_keyword,
         "supporting_keywords": payload.supporting_keywords,
@@ -150,6 +173,10 @@ def create_job(
         "output_format": payload.output_format,
         "quality_rubric": payload.quality_rubric,
         "persona": persona.model_dump(),
+        "writer_persona": resolved_payload_dict.get("writer_persona"),
+        "preferred_sources": preferred_sources,
+        "reference_media": reference_media,
+        "project_template_id": resolved_payload_dict.get("project_template_id"),
     }
     execution_id = workflow.launch(job_id, launch_payload)
     if execution_id:

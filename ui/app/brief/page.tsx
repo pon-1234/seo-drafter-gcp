@@ -56,6 +56,18 @@ export default function BriefPage() {
           }
         : undefined;
 
+      const writerName = (form.get('writer_name') as string)?.trim();
+      const writerPersona = writerName
+        ? {
+            name: writerName,
+            role: ((form.get('writer_role') as string) || '').trim() || undefined,
+            expertise: ((form.get('writer_expertise') as string) || '').trim() || undefined,
+            voice: ((form.get('writer_voice') as string) || '').trim() || undefined,
+            mission: ((form.get('writer_mission') as string) || '').trim() || undefined,
+            qualities: parseList(form.get('writer_qualities'), 'newline'),
+          }
+        : undefined;
+
       const headingModeValue = (form.get('heading_mode') as HeadingMode) || 'auto';
       const payload = {
         primary_keyword: form.get('primary_keyword'),
@@ -72,11 +84,15 @@ export default function BriefPage() {
         persona_brief: personaBrief,
         intended_cta: ((form.get('intended_cta') as string) || '').trim() || undefined,
         notation_guidelines: ((form.get('notation_guidelines') as string) || '').trim() || undefined,
+        writer_persona: writerPersona,
         heading_directive: {
           mode: headingModeValue,
           headings: headingModeValue === 'manual' ? parseList(form.get('heading_overrides'), 'newline') : [],
         },
         reference_urls: parseList(form.get('reference_urls'), 'newline'),
+        preferred_sources: parseList(form.get('preferred_sources'), 'newline'),
+        reference_media: parseList(form.get('reference_media'), 'newline'),
+        project_template_id: ((form.get('project_template_id') as string) || '').trim() || undefined,
       };
 
       const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://seo-drafter-api-yxk2eqrkvq-an.a.run.app';
@@ -213,6 +229,56 @@ export default function BriefPage() {
           </section>
 
           <section className="space-y-4">
+            <h3 className="text-sm font-semibold text-slate-900">書き手ペルソナ</h3>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <Label text="書き手名" />
+                <Input name="writer_name" placeholder="例: 井上あかり" />
+              </div>
+              <div>
+                <Label text="役割 / ポジション" />
+                <Input name="writer_role" placeholder="例: B2B SaaS コンテンツストラテジスト" />
+              </div>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <Label text="専門領域・強み" />
+                <Textarea
+                  name="writer_expertise"
+                  rows={3}
+                  placeholder="例: Hub分析によるコンテンツ連携設計、データドリブンSEO 等"
+                />
+              </div>
+              <div>
+                <Label text="声のトーン / 文体キーワード" />
+                <Textarea
+                  name="writer_voice"
+                  rows={3}
+                  placeholder="例: 共感とロジックを両立、VAKで情景を伝える 等"
+                />
+              </div>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <Label text="ミッション / 伝えたい価値" />
+                <Textarea
+                  name="writer_mission"
+                  rows={3}
+                  placeholder="例: 読者の迷いを解き、即行動できる自信を届ける"
+                />
+              </div>
+              <div>
+                <Label text="大切にするスタイル（1行1項目）" />
+                <Textarea
+                  name="writer_qualities"
+                  rows={3}
+                  placeholder="例: 数字と一次情報で裏付け\n意外性のある事例を必ず入れる"
+                />
+              </div>
+            </div>
+          </section>
+
+          <section className="space-y-4">
             <h3 className="text-sm font-semibold text-slate-900">ガイドライン</h3>
             <div className="grid gap-4 md:grid-cols-2">
               <div>
@@ -244,9 +310,25 @@ export default function BriefPage() {
                 <Input name="style_guide_id" placeholder="style-guide-default" />
               </div>
             </div>
-            <div>
-              <Label text="利用するプロンプトバージョン" />
-              <Input name="prompt_version" placeholder="v1" />
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <Label text="優先参照メディア / 媒体" />
+                <Textarea name="reference_media" rows={3} placeholder="例: Think with Google, HubSpotブログ" />
+              </div>
+              <div>
+                <Label text="優先参照ソース（ドメイン / URL）" />
+                <Textarea name="preferred_sources" rows={3} placeholder="例: https://www.meti.go.jp/, https://www.stat.go.jp/" />
+              </div>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <Label text="プロジェクトテンプレート ID" />
+                <Input name="project_template_id" placeholder="例: default-benefit-template" />
+              </div>
+              <div>
+                <Label text="利用するプロンプトバージョン" />
+                <Input name="prompt_version" placeholder="v1" />
+              </div>
             </div>
           </section>
 
@@ -278,11 +360,11 @@ export default function BriefPage() {
                   name="heading_overrides"
                   rows={6}
                   placeholder={[
-                    'リード：読むべき理由（QUESTのQ/Uで共感）',
-                    'まず知るべき要点（結論）',
-                    '定義と範囲（Owned/Earned/Paid）',
-                    '主要チャネルと役割（SEO/広告/メール/ソーシャル 等）',
-                    'KPIの因数分解（例：売上＝流入×CVR×AOV）'
+                    'リード：{keyword}で解決できる課題と得られる成果（QUEST）',
+                    '即効性のあるベネフィットと活用シナリオ',
+                    'ハブ分析で描く連携マップと優先タスク',
+                    '投資対効果と意外性のある成功・失敗事例',
+                    'CTAで導く次のアクションと顧客便益'
                   ].join('\n')}
                   required
                 />
