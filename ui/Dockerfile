@@ -6,14 +6,14 @@ RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
 # Install dependencies
-COPY package.json ./
+COPY ui/package.json ./package.json
 RUN npm install
 
 # Rebuild the source code only when needed
 FROM base AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+COPY ui/ .
 
 # Set build-time environment variables
 ARG NEXT_PUBLIC_API_BASE_URL=https://seo-drafter-api-yxk2eqrkvq-an.a.run.app

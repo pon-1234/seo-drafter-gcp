@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { apiFetch } from '@/lib/api';
 
 interface DraftListItem {
   draft_id: string;
@@ -30,14 +31,9 @@ export default function DraftsListPage() {
   const fetchDrafts = async () => {
     try {
       setLoading(true);
-      const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080';
-      const response = await fetch(`${apiBase}/api/drafts`);
-      
-      if (!response.ok) {
-        throw new Error('Failed to fetch drafts');
-      }
-
-      const data: DraftListResponse = await response.json();
+      const data = await apiFetch<DraftListResponse>('api/drafts', undefined, {
+        fallback: 'http://localhost:8080'
+      });
       setDrafts(data.drafts);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');

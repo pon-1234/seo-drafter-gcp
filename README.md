@@ -94,11 +94,35 @@ cd ..
 projects/{pid}/jobs/{jobId}
 projects/{pid}/prompts/{promptId}
 projects/{pid}/drafts/{draftId}
+projects/{pid}/persona_templates/{templateId}
 ```
 
 - `job` ドキュメントには `status`, `prompt_version`, `workflow_execution_id`, `seed` を保存。
 - `prompt` ドキュメントは `versions.{version}` に System/Developer/User をフラットに保存。
 - `draft` ドキュメントは GCS パス・品質指標・監査ログ ID を保持。
+- `persona_templates` コレクションに読者／書き手ペルソナのプリセットを格納し、UI から選択・適用できるようにしています。
+
+テンプレートは以下のエンドポイント、または UI の「テンプレート管理」ページ(`/persona/templates`)から管理できます。
+
+```
+# 一覧
+GET /api/persona/templates
+
+# 作成
+POST /api/persona/templates
+{
+  "id": "b2b-saas-akari",
+  "label": "B2B SaaS リード獲得（井上あかり）",
+  "reader": { ... },
+  "writer": { ... }
+}
+
+# 更新 / 削除
+PUT /api/persona/templates/{templateId}
+DELETE /api/persona/templates/{templateId}
+```
+
+Cloud Run 上では Firestore に保存した値が UI のプルダウンに反映され、ローカル開発ではサンプルテンプレート（井上あかり / 田中みさき）がインメモリで読み込まれます。
 
 ## 実装済み機能
 

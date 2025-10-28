@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { apiFetch } from '@/lib/api';
 
 interface InternalLink {
   url: string;
@@ -51,12 +52,7 @@ function PreviewPageContent() {
     setError(null);
     setBundle(null);
     try {
-      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://seo-drafter-api-yxk2eqrkvq-an.a.run.app';
-      const response = await fetch(baseUrl + `/api/drafts/${id}`);
-      if (!response.ok) {
-        throw new Error(await response.text());
-      }
-      const json = await response.json();
+      const json = await apiFetch<DraftBundle>(`api/drafts/${id}`);
       setBundle(json);
     } catch (err) {
       console.error(err);

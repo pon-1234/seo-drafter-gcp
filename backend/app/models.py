@@ -64,6 +64,63 @@ class PromptVersionCreate(BaseModel):
     description: Optional[str] = None
 
 
+class ReaderPersonaTemplate(BaseModel):
+    job_role: Optional[str] = None
+    experience_years: Optional[str] = None
+    needs: List[str] = Field(default_factory=list)
+    prohibited_expressions: List[str] = Field(default_factory=list)
+
+
+class WriterPersonaTemplate(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    expertise: Optional[str] = None
+    voice: Optional[str] = None
+    mission: Optional[str] = None
+    qualities: List[str] = Field(default_factory=list)
+
+
+class PersonaTemplateExtras(BaseModel):
+    intended_cta: Optional[str] = None
+    notation_guidelines: Optional[str] = None
+    quality_rubric: Optional[str] = None
+    preferred_sources: List[str] = Field(default_factory=list)
+    reference_media: List[str] = Field(default_factory=list)
+    supporting_keywords: List[str] = Field(default_factory=list)
+    reference_urls: List[str] = Field(default_factory=list)
+
+
+class PersonaTemplateHeading(BaseModel):
+    mode: HeadingMode = HeadingMode.auto
+    overrides: List[str] = Field(default_factory=list)
+
+
+class PersonaTemplateBase(BaseModel):
+    label: str
+    description: Optional[str] = None
+    reader: Optional[ReaderPersonaTemplate] = None
+    writer: Optional[WriterPersonaTemplate] = None
+    extras: Optional[PersonaTemplateExtras] = None
+    heading: Optional[PersonaTemplateHeading] = None
+
+
+class PersonaTemplateCreate(PersonaTemplateBase):
+    id: str = Field(description="Unique identifier for the template")
+
+
+class PersonaTemplate(PersonaTemplateBase):
+    id: str
+
+
+class PersonaTemplateUpdate(BaseModel):
+    label: Optional[str] = None
+    description: Optional[str] = None
+    reader: Optional[ReaderPersonaTemplate] = None
+    writer: Optional[WriterPersonaTemplate] = None
+    extras: Optional[PersonaTemplateExtras] = None
+    heading: Optional[PersonaTemplateHeading] = None
+
+
 class Persona(BaseModel):
     name: str
     job_to_be_done: Optional[str] = None

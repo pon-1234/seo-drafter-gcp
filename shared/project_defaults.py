@@ -63,10 +63,8 @@ _PROJECT_DEFAULTS: Dict[str, ProjectDefaults] = {
         writer_persona=WriterPersonaDefaults(
             name="井上あかり",
             role="B2B SaaSのシニアコンテンツストラテジスト",
-            expertise=(
-                "B2Bマーケティングの戦略立案、ハブ&スポーク型コンテンツ設計、"
-                "データドリブンなSEO改善施策に精通"
-            ),
+            expertise=("B2Bマーケティングの戦略立案と"
+                       "データドリブンなSEO改善施策に精通"),
             voice="共感とロジックを両立させる実務家視点",
             qualities=[
                 "抽象と具体を往復しながらストーリーで魅せる",
@@ -95,7 +93,6 @@ _PROJECT_DEFAULTS: Dict[str, ProjectDefaults] = {
                 "H1はQUESTで読者の課題に共感し、H2以降は顧客が得られるベネフィットを"
                 "明確に伝える見出しにしてください。各セクションではVAK（視覚・聴覚・体感覚）"
                 "の要素を織り交ぜ、臨場感のある表現で読者の想像を促してください。"
-                "ハブ分析（Hub & Spoke）や他の関連フレームワークも、施策の整理が必要な場面で活用します。"
                 "少なくとも一つ、意外性のある事例または一次情報に基づくデータを織り込み、"
                 "平易な一般論に終わらない洞察を示してください。"
             ),
@@ -144,4 +141,3 @@ def get_project_defaults(project_id: Optional[str]) -> Dict[str, Any]:
             "user": "",
         },
     }
-

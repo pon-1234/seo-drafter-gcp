@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -19,6 +19,9 @@ from ..models import (
     JobStatus,
     PersonaDeriveRequest,
     PersonaDeriveResponse,
+    PersonaTemplate,
+    PersonaTemplateCreate,
+    PersonaTemplateUpdate,
     PromptVersion,
     PromptVersionCreate,
     WriterPersona,
@@ -108,6 +111,50 @@ def derive_persona(
     persona = ai_gateway.generate_persona(payload)
     search_terms = [payload.primary_keyword, *payload.supporting_keywords]
     return PersonaDeriveResponse(persona=persona, provenance_search_terms=search_terms)
+
+
+@router.get("/api/persona/templates", response_model=List[PersonaTemplate])
+def list_persona_templates(store: FirestoreRepository = Depends(get_firestore)) -> List[PersonaTemplate]:
+    """Return registered persona templates for the project."""
+    return store.list_persona_templates()
+
+
+@router.post("/api/persona/templates", response_model=PersonaTemplate, responses={400: {"model": APIError}})
+def create_persona_template(
+    payload: PersonaTemplateCreate,
+    store: FirestoreRepository = Depends(get_firestore),
+) -> PersonaTemplate:
+    try:
+        return store.create_persona_template(payload)
+    except ValueError as exc:
+        if str(exc) == "template_exists":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Template with the same id already exists",
+            ) from exc
+        raise
+
+
+@router.put("/api/persona/templates/{template_id}", response_model=PersonaTemplate, responses={404: {"model": APIError}})
+def update_persona_template(
+    template_id: str,
+    payload: PersonaTemplateUpdate,
+    store: FirestoreRepository = Depends(get_firestore),
+) -> PersonaTemplate:
+    template = store.update_persona_template(template_id, payload)
+    if not template:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
+    return template
+
+
+@router.delete("/api/persona/templates/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_persona_template(
+    template_id: str,
+    store: FirestoreRepository = Depends(get_firestore),
+) -> None:
+    deleted = store.delete_persona_template(template_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
 
 
 @router.post("/api/jobs", response_model=Job, responses={400: {"model": APIError}})
@@ -345,7 +392,12 @@ def persist_draft(
 
 
 def _render_markdown(draft: dict) -> str:
-    payload = draft.get("draft") if "draft" in draft and isinstance(draft.get("draft"), dict) else draft
+    payload: dict = {}
+    if isinstance(draft, dict):
+        if "sections" in draft or "faq" in draft:
+            payload = draft
+        elif isinstance(draft.get("draft"), dict):
+            payload = draft.get("draft", {})
     sections = payload.get("sections", []) if isinstance(payload, dict) else []
     faq_items = payload.get("faq", []) if isinstance(payload, dict) else []
     lines = ["# 生成ドラフト"]

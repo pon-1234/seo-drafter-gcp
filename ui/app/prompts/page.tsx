@@ -6,6 +6,7 @@ import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs } from '@/components/ui/tabs';
+import { apiFetch } from '@/lib/api';
 
 type PromptLayer = 'system' | 'developer' | 'user';
 
@@ -50,16 +51,14 @@ export default function PromptsPage() {
           persona: '{{persona.name}}'
         }
       };
-      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://seo-drafter-api-yxk2eqrkvq-an.a.run.app';
-      const response = await fetch(baseUrl + '/api/prompts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (!response.ok) {
-        throw new Error(await response.text());
-      }
-      const result = await response.json();
+      const result = await apiFetch<{ version: string; description?: string; created_at: string }>(
+        'api/prompts',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        }
+      );
       const next: PromptVersionView = {
         version: result.version,
         description: result.description,

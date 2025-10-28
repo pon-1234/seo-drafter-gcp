@@ -2,38 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
-import sys
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-try:  # pragma: no cover - optional dependency
-    # Add backend to path for shared services
-    backend_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../backend"))
-    if backend_path not in sys.path:
-        sys.path.insert(0, backend_path)
-    from app.services.bigquery import InternalLinkRepository
-except ImportError:
-    InternalLinkRepository = None  # type: ignore
-
-# Shared project defaults
-try:
-    shared_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../"))
-    if shared_path not in sys.path:
-        sys.path.insert(0, shared_path)
-    from shared.project_defaults import get_project_defaults
-except ImportError:
-    get_project_defaults = lambda _project_id: {  # type: ignore
-        "writer_persona": {},
-        "preferred_sources": [],
-        "reference_media": [],
-        "prompt_layers": {
-            "system": "",
-            "developer": "",
-            "user": "",
-        },
-    }
+from shared.internal_links import InternalLinkRepository
+from shared.project_defaults import get_project_defaults
 
 # OpenAI Gateway is now local to worker
 try:
@@ -98,7 +72,7 @@ class DraftGenerationPipeline:
 
                 logger.error("Full traceback: %s", traceback.format_exc())
 
-        self.link_repository = InternalLinkRepository() if InternalLinkRepository else None
+        self.link_repository = InternalLinkRepository()
 
     def estimate_intent(self, payload: Dict) -> str:
         requested_intent = payload.get("intent")
@@ -183,10 +157,10 @@ class DraftGenerationPipeline:
                 ],
             },
             {
-                "text": f"ハブ分析で描く{keyword}連携マップ",
+                "text": f"施策連携で描く{keyword}活用マップ",
                 "purpose": "Plan",
                 "h3": [
-                    {"text": "ハブ施策とスポーク施策の役割分担", "purpose": "Plan"},
+                    {"text": "主要施策と支援施策の役割分担", "purpose": "Plan"},
                     {"text": "連携で生まれる顧客体験のイメージ", "purpose": "Plan"},
                 ],
             },
@@ -242,10 +216,10 @@ class DraftGenerationPipeline:
                 ],
             },
             {
-                "text": f"Hub分析で見抜く{keyword}×既存施策の連携効果",
+                "text": f"複数施策の連携で見抜く{keyword}×既存施策の相乗効果",
                 "purpose": "Plan",
                 "h3": [
-                    {"text": "ハブ機能とスポーク施策の組み合わせ", "purpose": "Plan"},
+                    {"text": "主要機能と周辺施策の組み合わせ", "purpose": "Plan"},
                     {"text": "連携で生まれる顧客体験の視覚化", "purpose": "Plan"},
                 ],
             },
@@ -429,10 +403,8 @@ class DraftGenerationPipeline:
             sections.append({"h2": h2["text"], "paragraphs": paragraphs})
 
         return {
-            "draft": {
-                "sections": sections,
-                "faq": self._generate_faq(context),
-            },
+            "sections": sections,
+            "faq": self._generate_faq(context),
             "claims": all_claims,
         }
 
@@ -473,8 +445,8 @@ class DraftGenerationPipeline:
         system_template = prompt_layers.get("system") or (
             "あなたは{writer_name}として執筆するシニアSEOライターです。"
             "読者の共感を呼びつつ、実務で使えるレベルまで噛み砕いて解説してください。"
-            "ハブ分析などの適切なフレームも活用しながら、VAK（視覚・聴覚・体感）"
-            "表現で臨場感を高め、少なくとも一つ意外性のある知見を盛り込みます。"
+            "適切なフレームも活用しながら、VAK（視覚・聴覚・体感）表現で臨場感を高め、"
+            "少なくとも一つ意外性のある知見を盛り込みます。"
         )
         developer_template = prompt_layers.get("developer") or (
             "出力はMarkdownで、セクション内の最後に必ず『顧客便益: 〜』と締めてください。"
@@ -625,14 +597,9 @@ class DraftGenerationPipeline:
         keyword = prompt["primary_keyword"]
         persona_goals = context.persona.get("goals", [])
 
-        if not self.link_repository:
-            logger.warning("Link repository not available, using fallback")
-            return [{
-                "url": f"https://example.com/articles/{keyword}-guide",
-                "title": f"{keyword} ガイド",
-                "anchor": f"{keyword} と関連するガイド",
-                "score": 0.5,
-            }]
+        if not self.link_repository or not self.link_repository.is_enabled:
+            logger.info("Link repository not available; skipping internal link suggestions")
+            return []
 
         try:
             candidates = self.link_repository.search(keyword, persona_goals, limit=5)
@@ -642,7 +609,7 @@ class DraftGenerationPipeline:
                     "url": candidate["url"],
                     "title": candidate["title"],
                     "anchor": f"{keyword} と関連する {candidate['title']}",
-                    "score": candidate.get("score", 0.5),
+                    "score": candidate.get("score", 0.0),
                     "snippet": candidate.get("snippet", ""),
                 })
             logger.info("Proposed %d internal links for keyword: %s", len(results), keyword)
@@ -654,7 +621,10 @@ class DraftGenerationPipeline:
     def evaluate_quality(self, draft: Dict, context: PipelineContext) -> Dict:
         claims_without_citations = [c for c in draft.get("claims", []) if not c.get("citations")]
         duplication_score = 0.08 if context.article_type == "ranking" else 0.12
-        sections = draft.get("draft", {}).get("sections", [])
+        sections_payload = draft
+        if isinstance(draft, dict) and "sections" not in draft and isinstance(draft.get("draft"), dict):
+            sections_payload = draft.get("draft", {})
+        sections = sections_payload.get("sections", []) if isinstance(sections_payload, dict) else []
         paragraphs = [p for section in sections for p in section.get("paragraphs", [])]
         has_citations = any(p.get("citations") for p in paragraphs)
 

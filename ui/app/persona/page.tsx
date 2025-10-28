@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { apiFetch } from '@/lib/api';
 
 interface PersonaProfile {
   name: string;
@@ -46,16 +47,11 @@ export default function PersonaPage() {
     setLoading(true);
     setMessage(null);
     try {
-      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://seo-drafter-api-yxk2eqrkvq-an.a.run.app';
-      const response = await fetch(`${baseUrl}/api/persona/derive`, {
+      const { persona: derived } = await apiFetch<{ persona: PersonaProfile }>('api/persona/derive', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ primary_keyword: primaryKeyword })
       });
-      if (!response.ok) {
-        throw new Error(await response.text());
-      }
-      const { persona: derived } = (await response.json()) as { persona: PersonaProfile };
       setPersona(derived);
       setEditorValue(JSON.stringify(derived, null, 2));
       setMessage('ペルソナを取得しました。必要に応じて編集してください。');

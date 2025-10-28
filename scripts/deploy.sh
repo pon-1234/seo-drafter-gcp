@@ -6,9 +6,14 @@ PROJECT_ID="seo-drafter-gcp"
 REGION="asia-northeast1"
 REGISTRY="${REGION}-docker.pkg.dev/${PROJECT_ID}/seo-drafter"
 
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+ROOT_DIR=$(cd "$SCRIPT_DIR/.." && pwd)
+cd "$ROOT_DIR"
+
 echo "=== SEO Drafter Deployment Script ==="
 echo "Project: $PROJECT_ID"
 echo "Region: $REGION"
+echo "Root: $ROOT_DIR"
 echo ""
 
 # Check if gcloud is authenticated
@@ -26,12 +31,13 @@ build_and_push() {
   local tag="${REGISTRY}/${service}:latest"
 
   echo "Building $service..."
-  cd $service
-  docker build -t $tag .
-  echo "Pushing $service to Artifact Registry..."
-  docker push $tag
-  cd ..
-
+  docker buildx build \
+    --platform linux/amd64 \
+    --tag "$tag" \
+    --file "$service/Dockerfile" \
+    --push \
+    "$ROOT_DIR"
+  
   echo "✓ $service image pushed: $tag"
 }
 
@@ -105,6 +111,12 @@ echo "=== Deploying Cloud Run services ==="
 # Get service URLs for environment variables
 if [[ "$SERVICES" == *"backend"* ]]; then
   BACKEND_ENV="GCP_PROJECT=${PROJECT_ID},GCP_REGION=${REGION},DRAFTS_BUCKET=${PROJECT_ID}-drafts,BIGQUERY_DATASET=seo_drafter,WORKFLOW_NAME=draft-generation,WORKFLOW_LOCATION=${REGION},VERTEX_MODEL_PRO=gemini-1.5-pro-002,VERTEX_MODEL_FLASH=gemini-1.5-flash-002"
+  if [[ -n "$OPENAI_API_KEY" ]]; then
+    BACKEND_ENV+=",OPENAI_API_KEY=${OPENAI_API_KEY}"
+  fi
+  if [[ -n "$OPENAI_MODEL" ]]; then
+    BACKEND_ENV+=",OPENAI_MODEL=${OPENAI_MODEL}"
+  fi
 
   deploy_cloud_run \
     "seo-drafter-api" \
@@ -120,6 +132,12 @@ fi
 
 if [[ "$SERVICES" == *"worker"* ]]; then
   WORKER_ENV="GCP_PROJECT=${PROJECT_ID},GCP_REGION=${REGION},BIGQUERY_DATASET=seo_drafter,VERTEX_MODEL_PRO=gemini-1.5-pro-002,VERTEX_MODEL_FLASH=gemini-1.5-flash-002"
+  if [[ -n "$OPENAI_API_KEY" ]]; then
+    WORKER_ENV+=",OPENAI_API_KEY=${OPENAI_API_KEY}"
+  fi
+  if [[ -n "$OPENAI_MODEL" ]]; then
+    WORKER_ENV+=",OPENAI_MODEL=${OPENAI_MODEL}"
+  fi
 
   deploy_cloud_run \
     "seo-drafter-worker" \

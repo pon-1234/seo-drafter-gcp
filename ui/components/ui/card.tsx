@@ -17,6 +17,6 @@ export function CardContent({ children, className }: { children: ReactNode; clas
   return <div className={`px-6 py-4 ${className || ''}`}>{children}</div>;
 }
 
-export function CardFooter({ children }: { children: ReactNode }) {
-  return <div className="flex items-center justify-end gap-2 px-6 py-4">{children}</div>;
+export function CardFooter({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={`flex items-center justify-end gap-2 px-6 py-4 ${className || ''}`}>{children}</div>;
 }

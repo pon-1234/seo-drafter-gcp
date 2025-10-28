@@ -32,6 +32,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               <a href="/persona" className="hover:text-primary">
                 ペルソナスタジオ
               </a>
+              <a href="/persona/templates" className="hover:text-primary">
+                テンプレート管理
+              </a>
             </nav>
           </header>
           <main className="flex-1">{children}</main>

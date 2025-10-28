@@ -1,15 +1,49 @@
 'use client';
 
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { apiFetch } from '@/lib/api';
 
 type DraftIntent = 'information' | 'comparison' | 'transaction';
 type ArticleType = 'information' | 'comparison' | 'ranking' | 'closing';
 type OutputFormat = 'docs' | 'html';
 type HeadingMode = 'auto' | 'manual';
+
+type PersonaTemplate = {
+  id: string;
+  label: string;
+  description?: string;
+  reader?: {
+    job_role?: string;
+    experience_years?: string;
+    needs?: string[];
+    prohibited_expressions?: string[];
+  };
+  writer?: {
+    name?: string;
+    role?: string;
+    expertise?: string;
+    voice?: string;
+    mission?: string;
+    qualities?: string[];
+  };
+  extras?: {
+    intended_cta?: string;
+    notation_guidelines?: string;
+    quality_rubric?: string;
+    preferred_sources?: string[];
+    reference_media?: string[];
+    supporting_keywords?: string[];
+    reference_urls?: string[];
+  };
+  heading?: {
+    mode: HeadingMode;
+    overrides?: string[];
+  };
+};
 
 const Label = ({ text, required = false }: { text: string; required?: boolean }) => (
   <label className="text-sm font-medium text-slate-700">
@@ -24,10 +58,40 @@ export default function BriefPage() {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [headingMode, setHeadingMode] = useState<HeadingMode>('auto');
+  const [selectedTemplate, setSelectedTemplate] = useState<string>('');
+  const formRef = useRef<HTMLFormElement>(null);
+  const [personaTemplates, setPersonaTemplates] = useState<PersonaTemplate[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState<boolean>(false);
+  const [templateError, setTemplateError] = useState<string | null>(null);
 
   const articleTypes: ArticleType[] = useMemo(() => ['information', 'comparison', 'ranking', 'closing'], []);
   const outputFormats: OutputFormat[] = useMemo(() => ['docs', 'html'], []);
   const rubrics = useMemo(() => ['standard', 'eeat-focused', 'originality-plus'], []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const loadTemplates = async () => {
+      setTemplatesLoading(true);
+      setTemplateError(null);
+      try {
+        const data = await apiFetch<PersonaTemplate[]>(
+          'api/persona/templates',
+          { signal: controller.signal }
+        );
+        setPersonaTemplates(data);
+      } catch (error) {
+        if ((error as Error).name !== 'AbortError') {
+          console.error(error);
+          setTemplateError('テンプレートの取得に失敗しました。');
+        }
+      } finally {
+        setTemplatesLoading(false);
+      }
+    };
+
+    loadTemplates();
+    return () => controller.abort();
+  }, []);
 
   const parseList = (value: FormDataEntryValue | null, mode: 'flex' | 'newline' = 'flex'): string[] => {
     if (!value) return [];
@@ -37,6 +101,71 @@ export default function BriefPage() {
       .split(pattern)
       .map((item) => item.trim())
       .filter(Boolean);
+  };
+
+  const applyTemplate = (templateId: string) => {
+    if (!formRef.current) return;
+    const template = personaTemplates.find((item) => item.id === templateId);
+    if (!template) {
+      setStatus('テンプレートが見つかりませんでした。');
+      return;
+    }
+
+    const form = formRef.current;
+
+    const setValue = (name: string, value?: string) => {
+      const element = form.elements.namedItem(name) as
+        | HTMLInputElement
+        | HTMLTextAreaElement
+        | HTMLSelectElement
+        | null;
+      if (element) {
+        element.value = value ?? '';
+      }
+    };
+
+    if (template.reader) {
+      setValue('persona_job_role', template.reader.job_role);
+      setValue('persona_experience_years', template.reader.experience_years);
+      setValue('persona_needs', (template.reader.needs || []).join('\n'));
+      setValue(
+        'persona_prohibited_expressions',
+        (template.reader.prohibited_expressions || []).join('\n')
+      );
+    }
+
+    if (template.writer) {
+      setValue('writer_name', template.writer.name);
+      setValue('writer_role', template.writer.role);
+      setValue('writer_expertise', template.writer.expertise);
+      setValue('writer_voice', template.writer.voice);
+      setValue('writer_mission', template.writer.mission);
+      setValue('writer_qualities', (template.writer.qualities || []).join('\n'));
+    }
+
+    if (template.extras) {
+      setValue('intended_cta', template.extras.intended_cta);
+      setValue('notation_guidelines', template.extras.notation_guidelines);
+      setValue('quality_rubric', template.extras.quality_rubric);
+      setValue('preferred_sources', (template.extras.preferred_sources || []).join('\n'));
+      setValue('reference_media', (template.extras.reference_media || []).join('\n'));
+      setValue('supporting_keywords', (template.extras.supporting_keywords || []).join('\n'));
+      setValue('reference_urls', (template.extras.reference_urls || []).join('\n'));
+    }
+
+    if (template.heading) {
+      setHeadingMode(template.heading.mode);
+      const headingField = form.elements.namedItem('heading_mode') as
+        | HTMLSelectElement
+        | HTMLInputElement
+        | null;
+      if (headingField) {
+        headingField.value = template.heading.mode;
+      }
+      setValue('heading_overrides', (template.heading.overrides || []).join('\n'));
+    }
+
+    setStatus(`テンプレート「${template.label}」を適用しました。`);
   };
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -95,19 +224,15 @@ export default function BriefPage() {
         project_template_id: ((form.get('project_template_id') as string) || '').trim() || undefined,
       };
 
-      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://seo-drafter-api-yxk2eqrkvq-an.a.run.app';
-      const response = await fetch(baseUrl + '/api/jobs', {
+      const body = await apiFetch<{ id: string }>('api/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      if (!response.ok) {
-        throw new Error(await response.text());
-      }
-      const body = await response.json();
       setStatus(`ジョブ作成に成功しました: ${body.id}`);
       formElement.reset();
       setHeadingMode('auto');
+      setSelectedTemplate('');
     } catch (error) {
       console.error(error);
       setStatus('ジョブ作成に失敗しました。入力内容とバックエンド設定を確認してください。');
@@ -122,8 +247,51 @@ export default function BriefPage() {
         title="記事作成依頼フォーム"
         description="ラベルに「必須」とある項目はすべて入力してください。送信するとプロンプトとペルソナ設定に値が転記され、Cloud Workflows で生成ジョブが開始されます。"
       />
-      <form onSubmit={onSubmit}>
+      <form ref={formRef} onSubmit={onSubmit}>
         <CardContent className="space-y-8">
+          <section className="space-y-4">
+            <h3 className="text-sm font-semibold text-slate-900">テンプレート適用</h3>
+            <div className="grid gap-4 md:grid-cols-[2fr_auto] items-end">
+              <div className="space-y-2">
+                <Label text="テンプレート" />
+                <select
+                  name="persona_template"
+                  value={selectedTemplate}
+                  onChange={(event) => {
+                    setSelectedTemplate(event.target.value);
+                    setStatus(null);
+                  }}
+                  className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  disabled={templatesLoading || personaTemplates.length === 0}
+                >
+                  <option value="">{templatesLoading ? '読み込み中…' : 'テンプレートを選択してください'}</option>
+                  {personaTemplates.map((template) => (
+                    <option key={template.id} value={template.id}>
+                      {template.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => applyTemplate(selectedTemplate)}
+                disabled={!selectedTemplate || personaTemplates.length === 0}
+              >
+                テンプレートを適用
+              </Button>
+            </div>
+            {templateError ? (
+              <p className="text-xs text-red-500">{templateError}</p>
+            ) : personaTemplates.length === 0 && !templatesLoading ? (
+              <p className="text-xs text-slate-500">テンプレートが登録されていません。Firestore に追加するとここに表示されます。</p>
+            ) : selectedTemplate ? (
+              <p className="text-xs text-slate-500">
+                選択したテンプレートの値でフォームが上書きされます。変更後に必要に応じて微調整してください。
+              </p>
+            ) : null}
+          </section>
+
           <section className="space-y-4">
             <h3 className="text-sm font-semibold text-slate-900">基本情報</h3>
             <div className="grid gap-4 md:grid-cols-2">
@@ -246,7 +414,7 @@ export default function BriefPage() {
                 <Textarea
                   name="writer_expertise"
                   rows={3}
-                  placeholder="例: Hub分析によるコンテンツ連携設計、データドリブンSEO 等"
+                  placeholder="例: 施策連携によるコンテンツ設計、データドリブンSEO 等"
                 />
               </div>
               <div>
@@ -362,7 +530,7 @@ export default function BriefPage() {
                   placeholder={[
                     'リード：{keyword}で解決できる課題と得られる成果（QUEST）',
                     '即効性のあるベネフィットと活用シナリオ',
-                    'ハブ分析で描く連携マップと優先タスク',
+                    '施策連携で描く活用マップと優先タスク',
                     '投資対効果と意外性のある成功・失敗事例',
                     'CTAで導く次のアクションと顧客便益'
                   ].join('\n')}
