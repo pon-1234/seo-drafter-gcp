@@ -74,6 +74,7 @@ cd ..
 ```
 
 詳細なデプロイ手順は [DEPLOYMENT.md](./DEPLOYMENT.md) を参照してください。
+`deploy.sh` は既存の Cloud Run サービスから環境変数を再利用する際に `jq` を利用するため、事前に `brew install jq` 等でインストールしておいてください。
 
 ### 個別デプロイ
 

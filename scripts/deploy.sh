@@ -66,6 +66,38 @@ deploy_cloud_run() {
   echo "✓ $service deployed successfully"
 }
 
+ensure_openai_credentials() {
+  if [[ -n "$OPENAI_API_KEY" ]]; then
+    return
+  fi
+
+  if [[ "$SERVICES" != *"backend"* && "$SERVICES" != *"worker"* ]]; then
+    return
+  fi
+
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "Error: OPENAI_API_KEY is not set and jq is not installed to reuse it from existing services." >&2
+    exit 1
+  fi
+
+  local existing_key=""
+  local services_to_check=("seo-drafter-api" "seo-drafter-worker")
+  for svc in "${services_to_check[@]}"; do
+    local describe_output
+    if describe_output=$(gcloud run services describe "$svc" --region="$REGION" --format=json 2>/dev/null); then
+      existing_key=$(echo "$describe_output" | jq -r '.spec.template.spec.containers[0].env[] | select(.name=="OPENAI_API_KEY").value' | head -n1)
+      if [[ -n "$existing_key" && "$existing_key" != "null" ]]; then
+        OPENAI_API_KEY="$existing_key"
+        echo "Reusing OpenAI API key from existing $svc deployment."
+        return
+      fi
+    fi
+  done
+
+  echo "Error: OPENAI_API_KEY is not set. Export OPENAI_API_KEY before running deploy.sh." >&2
+  exit 1
+}
+
 # Parse command line arguments
 SKIP_BUILD=false
 SERVICES=""
@@ -107,6 +139,10 @@ fi
 
 # Deploy services
 echo "=== Deploying Cloud Run services ==="
+
+if [[ "$SERVICES" == *"backend"* || "$SERVICES" == *"worker"* ]]; then
+  ensure_openai_credentials
+fi
 
 # Get service URLs for environment variables
 if [[ "$SERVICES" == *"backend"* ]]; then
