@@ -21,9 +21,6 @@ class Settings(BaseSettings):
 
     openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
     openai_model: str = Field(default="gpt-4o", alias="OPENAI_MODEL")
-    line_channel_access_token: Optional[str] = Field(default=None, alias="LINE_CHANNEL_ACCESS_TOKEN")
-    line_api_base_url: str = Field(default="https://api.line.me/v2/bot", alias="LINE_API_BASE_URL")
-    line_default_target: Optional[str] = Field(default=None, alias="LINE_DEFAULT_TARGET")
 
 
 @lru_cache

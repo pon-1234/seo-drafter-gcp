@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-import uuid
 from typing import Any, Dict, List, Optional
 
 try:  # pragma: no cover - optional dependency
@@ -21,9 +20,6 @@ except ImportError:  # pragma: no cover - local fallback
 
 from ..core.config import get_settings
 from ..models import (
-    Cast,
-    ChatEvent,
-    ChatEventCreate,
     Job,
     JobCreate,
     JobStatus,
@@ -32,9 +28,6 @@ from ..models import (
     PersonaTemplateUpdate,
     PromptVersion,
     PromptVersionCreate,
-    ReservationEvent,
-    ReservationEventCreate,
-    Store,
 )
 
 logger = logging.getLogger(__name__)
@@ -148,10 +141,6 @@ class FirestoreRepository:
                 },
             },
         }
-        self._stores: Dict[str, Store] = {}
-        self._casts: Dict[str, Cast] = {}
-        self._chat_events: Dict[str, ChatEvent] = {}
-        self._reservation_events: Dict[str, ReservationEvent] = {}
 
     def _doc_path(self, collection: str, doc_id: str) -> str:
         if self._namespace:
@@ -333,139 +322,3 @@ class FirestoreRepository:
             self._persona_templates.pop(template_id)
             removed = True
         return removed
-
-    # Stores and casts
-    def upsert_store(self, store: Store) -> Store:
-        data = store.model_dump(exclude_none=True)
-        if self._client:
-            doc_ref = self._client.document(self._doc_path("stores", store.id))
-            doc_ref.set(data, merge=True)
-        self._stores[store.id] = store
-        return store
-
-    def get_store(self, store_id: str) -> Optional[Store]:
-        if self._client:
-            doc_ref = self._client.document(self._doc_path("stores", store_id))
-            try:
-                snapshot = doc_ref.get()
-            except gcloud_exceptions.NotFound:  # pragma: no cover
-                snapshot = None
-            if snapshot and snapshot.exists:
-                data = snapshot.to_dict() or {}
-                data["id"] = store_id
-                return Store(**data)
-        return self._stores.get(store_id)
-
-    def upsert_cast(self, cast: Cast) -> Cast:
-        data = cast.model_dump(exclude_none=True)
-        if self._client:
-            doc_ref = self._client.document(self._doc_path("casts", cast.id))
-            doc_ref.set(data, merge=True)
-        self._casts[cast.id] = cast
-        return cast
-
-    def get_cast(self, cast_id: str) -> Optional[Cast]:
-        if self._client:
-            doc_ref = self._client.document(self._doc_path("casts", cast_id))
-            try:
-                snapshot = doc_ref.get()
-            except gcloud_exceptions.NotFound:  # pragma: no cover
-                snapshot = None
-            if snapshot and snapshot.exists:
-                data = snapshot.to_dict() or {}
-                data["id"] = cast_id
-                return Cast(**data)
-        return self._casts.get(cast_id)
-
-    # Events
-    def create_chat_event(self, payload: ChatEventCreate) -> ChatEvent:
-        event_id = payload.event_id or str(uuid.uuid4())
-        event = ChatEvent(
-            id=event_id,
-            cast_id=payload.cast_id,
-            store_id=payload.store_id,
-            sender_name=payload.sender_name,
-            customer_name=payload.customer_name,
-            message=payload.message,
-            channel=payload.channel,
-            unread_count=payload.unread_count,
-            metadata=dict(payload.metadata),
-            sent_at=payload.sent_at,
-        )
-        if self._client:
-            collection = self._collection("chat_events")
-            if collection:
-                collection.document(event.id).set(event.model_dump())
-        self._chat_events[event.id] = event
-        return event
-
-    def list_chat_events(self, cast_id: Optional[str] = None, limit: int = 20) -> List[ChatEvent]:
-        events: List[ChatEvent] = []
-        if self._client:
-            collection = self._collection("chat_events")
-            if collection:
-                query = collection.order_by(
-                    "recorded_at", direction=firestore.Query.DESCENDING
-                ).limit(limit)
-                if cast_id:
-                    query = query.where("cast_id", "==", cast_id)
-                try:
-                    for doc in query.stream():
-                        data = doc.to_dict() or {}
-                        data["id"] = doc.id
-                        events.append(ChatEvent(**data))
-                except Exception as exc:
-                    logger.error("Error listing chat events: %s", exc)
-        if not events:
-            events = [event for event in self._chat_events.values() if not cast_id or event.cast_id == cast_id]
-            events.sort(key=lambda entry: entry.recorded_at, reverse=True)
-        return events[:limit]
-
-    def create_reservation_event(self, payload: ReservationEventCreate) -> ReservationEvent:
-        event_id = payload.event_id or str(uuid.uuid4())
-        event = ReservationEvent(
-            id=event_id,
-            reservation_id=payload.reservation_id,
-            cast_id=payload.cast_id,
-            store_id=payload.store_id,
-            customer_name=payload.customer_name,
-            customer_contact=payload.customer_contact,
-            menu_name=payload.menu_name,
-            channel=payload.channel,
-            note=payload.note,
-            metadata=dict(payload.metadata),
-            start_at=payload.start_at,
-            end_at=payload.end_at,
-            status=payload.status,
-            created_at=payload.created_at,
-        )
-        if self._client:
-            collection = self._collection("reservation_events")
-            if collection:
-                collection.document(event.id).set(event.model_dump())
-        self._reservation_events[event.id] = event
-        return event
-
-    def list_reservation_events(self, cast_id: Optional[str] = None, limit: int = 20) -> List[ReservationEvent]:
-        events: List[ReservationEvent] = []
-        if self._client:
-            collection = self._collection("reservation_events")
-            if collection:
-                query = collection.order_by(
-                    "start_at", direction=firestore.Query.DESCENDING
-                ).limit(limit)
-                if cast_id:
-                    query = query.where("cast_id", "==", cast_id)
-                try:
-                    for doc in query.stream():
-                        data = doc.to_dict() or {}
-                        data["id"] = doc.id
-                        events.append(ReservationEvent(**data))
-                except Exception as exc:
-                    logger.error("Error listing reservation events: %s", exc)
-        if not events:
-            events = [
-                event for event in self._reservation_events.values() if not cast_id or event.cast_id == cast_id
-            ]
-            events.sort(key=lambda entry: entry.start_at, reverse=True)
-        return events[:limit]

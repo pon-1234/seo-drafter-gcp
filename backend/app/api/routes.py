@@ -2,18 +2,13 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
-from typing import List, Optional, Tuple
-from zoneinfo import ZoneInfo
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from ..core.config import get_settings
 from ..models import (
     APIError,
-    ChatEvent,
-    ChatEventCreate,
-    ChatNotificationResponse,
     DraftApproveRequest,
     DraftBundle,
     DraftListItem,
@@ -29,26 +24,13 @@ from ..models import (
     PersonaTemplateUpdate,
     PromptVersion,
     PromptVersionCreate,
-    ReservationEvent,
-    ReservationEventCreate,
-    ReservationNotificationResponse,
-    ReservationStatus,
     WriterPersona,
-    Cast,
-    Store,
-    LineRecipient,
 )
 from ..services.firestore import FirestoreRepository
 from ..services.gcs import DraftStorage
 from ..services.quality import QualityEngine
 from ..services.workflow import WorkflowLauncher
 from ..services.project_settings import load_project_settings
-from ..services.line_notifications import (
-    LineNotificationError,
-    LineNotifier,
-    default_recipients,
-    dedupe_recipients,
-)
 
 try:
     from ..services.openai_gateway import OpenAIGateway
@@ -59,112 +41,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-DEFAULT_TIMEZONE = "Asia/Tokyo"
-
-
-def _coerce_timezone(tz_name: Optional[str]) -> ZoneInfo:
-    candidate = (tz_name or DEFAULT_TIMEZONE).strip() or DEFAULT_TIMEZONE
-    try:
-        return ZoneInfo(candidate)
-    except Exception:  # pragma: no cover - defensive fallback
-        return ZoneInfo(DEFAULT_TIMEZONE)
-
-
-def _format_timestamp(dt: datetime, tz_name: Optional[str]) -> str:
-    tz = _coerce_timezone(tz_name)
-    if dt.tzinfo:
-        localized = dt.astimezone(tz)
-    else:
-        localized = dt.replace(tzinfo=timezone.utc).astimezone(tz)
-    return localized.strftime("%Y-%m-%d %H:%M")
-
-
-def _resolve_recipients(
-    repo: FirestoreRepository, cast_id: Optional[str], store_id: Optional[str]
-) -> Tuple[List[LineRecipient], Optional[Cast], Optional[Store]]:
-    cast = repo.get_cast(cast_id) if cast_id else None
-    resolved_store_id = store_id or (cast.store_id if cast else None)
-    store = repo.get_store(resolved_store_id) if resolved_store_id else None
-
-    candidates: List[Optional[LineRecipient]] = []
-    if cast and cast.line_recipient:
-        candidates.append(cast.line_recipient)
-    if cast:
-        candidates.extend(cast.additional_recipients)
-    if store and store.line_recipient:
-        candidates.append(store.line_recipient)
-    candidates.extend(default_recipients())
-
-    recipients = dedupe_recipients(candidates)
-    return recipients, cast, store
-
-
-def _build_chat_message(event: ChatEvent, cast: Optional[Cast], store: Optional[Store]) -> str:
-    store_label = store.name if store else (event.store_id or "店舗未登録")
-    cast_label = cast.name if cast else event.cast_id
-    timestamp = _format_timestamp(event.sent_at, store.timezone if store else None)
-    lines = [
-        "📩 新着チャット",
-        f"店舗: {store_label}",
-        f"キャスト: {cast_label}",
-        f"受信: {timestamp}",
-    ]
-    if event.customer_name:
-        lines.append(f"お客様: {event.customer_name}")
-    if event.sender_name and event.sender_name != event.customer_name:
-        lines.append(f"送信者: {event.sender_name}")
-    if event.channel:
-        lines.append(f"経路: {event.channel}")
-    if event.unread_count is not None:
-        lines.append(f"未読件数: {event.unread_count}")
-    if event.metadata:
-        for key, value in event.metadata.items():
-            lines.append(f"{key}: {value}")
-    lines.append("----")
-    lines.append(event.message)
-    return "\n".join(lines)
-
-
-STATUS_LABEL = {
-    ReservationStatus.pending: "仮予約",
-    ReservationStatus.confirmed: "確定",
-    ReservationStatus.cancelled: "キャンセル",
-    ReservationStatus.completed: "完了",
-}
-
-
-def _build_reservation_message(
-    event: ReservationEvent, cast: Optional[Cast], store: Optional[Store]
-) -> str:
-    store_label = store.name if store else (event.store_id or "店舗未登録")
-    cast_label = cast.name if cast else event.cast_id
-    start = _format_timestamp(event.start_at, store.timezone if store else None)
-    end = None
-    if event.end_at:
-        end = _format_timestamp(event.end_at, store.timezone if store else None)
-    timeframe = f"{start} - {end}" if end else start
-    status_label = STATUS_LABEL.get(event.status, event.status.value)
-    lines = [
-        "🗓️ 新着予約",
-        f"店舗: {store_label}",
-        f"キャスト: {cast_label}",
-        f"日時: {timeframe}",
-        f"ステータス: {status_label}",
-    ]
-    if event.menu_name:
-        lines.append(f"メニュー: {event.menu_name}")
-    if event.customer_name:
-        lines.append(f"お客様: {event.customer_name}")
-    if event.customer_contact:
-        lines.append(f"連絡先: {event.customer_contact}")
-    if event.channel:
-        lines.append(f"経路: {event.channel}")
-    if event.note:
-        lines.append(f"備考: {event.note}")
-    if event.metadata:
-        for key, value in event.metadata.items():
-            lines.append(f"{key}: {value}")
-    return "\n".join(lines)
 
 def get_firestore() -> FirestoreRepository:
     return FirestoreRepository()
@@ -279,37 +155,6 @@ def delete_persona_template(
     deleted = store.delete_persona_template(template_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
-
-
-@router.post(
-    "/internal/notifications/chat",
-    response_model=ChatNotificationResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-)
-async def create_chat_notification(
-    payload: ChatEventCreate,
-    repo: FirestoreRepository = Depends(get_firestore),
-) -> ChatNotificationResponse:
-    event = repo.create_chat_event(payload)
-    recipients, cast, store_entry = _resolve_recipients(repo, event.cast_id, event.store_id)
-    errors: List[str] = []
-
-    if not recipients:
-        logger.warning("No LINE recipients resolved for chat event %s", event.id)
-        return ChatNotificationResponse(event=event, recipients=[], errors=["no_recipients"])
-
-    try:
-        notifier = LineNotifier()
-    except LineNotificationError as exc:
-        logger.warning("LINE notifier unavailable: %s", exc)
-        errors.append(str(exc))
-        return ChatNotificationResponse(event=event, recipients=recipients, errors=errors)
-
-    message = _build_chat_message(event, cast, store_entry)
-    dispatch_errors = await notifier.notify_text(recipients, message)
-    errors.extend(dispatch_errors)
-
-    return ChatNotificationResponse(event=event, recipients=recipients, errors=errors)
 
 
 @router.post("/api/jobs", response_model=Job, responses={400: {"model": APIError}})
@@ -608,32 +453,3 @@ def approve_draft(
         if url and (url.startswith('http://') or url.startswith('https://')):
             signed_urls[key] = url
     return quality.bundle(draft_id, paths, metadata, quality_payload, signed_urls=signed_urls or None)
-@router.post(
-    "/internal/notifications/reservation",
-    response_model=ReservationNotificationResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-)
-async def create_reservation_notification(
-    payload: ReservationEventCreate,
-    repo: FirestoreRepository = Depends(get_firestore),
-) -> ReservationNotificationResponse:
-    event = repo.create_reservation_event(payload)
-    recipients, cast, store_entry = _resolve_recipients(repo, event.cast_id, event.store_id)
-    errors: List[str] = []
-
-    if not recipients:
-        logger.warning("No LINE recipients resolved for reservation event %s", event.id)
-        return ReservationNotificationResponse(event=event, recipients=[], errors=["no_recipients"])
-
-    try:
-        notifier = LineNotifier()
-    except LineNotificationError as exc:
-        logger.warning("LINE notifier unavailable: %s", exc)
-        errors.append(str(exc))
-        return ReservationNotificationResponse(event=event, recipients=recipients, errors=errors)
-
-    message = _build_reservation_message(event, cast, store_entry)
-    dispatch_errors = await notifier.notify_text(recipients, message)
-    errors.extend(dispatch_errors)
-
-    return ReservationNotificationResponse(event=event, recipients=recipients, errors=errors)
