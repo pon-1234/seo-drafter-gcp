@@ -19,6 +19,12 @@ shared/    # 共有ユーティリティ配置予定
 - `POST /internal/drafts` は Workflow → Worker → API の内部連携用エンドポイント。生成物を GCS に保存し、品質判定を実施し、Firestore のステータスを更新。
 - `GET /api/drafts/{id}`, `POST /api/drafts/{id}/approve` で UI からプレビュー/承認操作。
 
+### LINE 通知
+- `LINE_CHANNEL_ACCESS_TOKEN` と任意の `LINE_DEFAULT_TARGET`（例: `group:Cxxxxxxxx|池袋店`) を環境変数に指定すると、チャット・予約イベントを既定の宛先へプッシュ通知できます。
+- `POST /internal/notifications/chat` はチャット受信時のイベントを受け取り、キャスト／店舗／既定宛先の LINE ID を解決してメッセージを送信します。
+- `POST /internal/notifications/reservation` は予約確定/仮予約イベントを受け取り、日時やメニュー・顧客情報を含む通知を配信します。
+- Firestore の `casts` / `stores` ドキュメントに `line_recipient`（`type`: `user`/`group`/`room`, `identifier`: LINE ID）や `additional_recipients` を登録しておくと、キャストごと・店舗ごとの通知先を柔軟に制御できます。ローカル環境ではインメモリにフォールバックします。
+
 GCP ライブラリが利用できないローカル環境ではインメモリ実装にフォールバックするため、`GCP_PROJECT` や `DRAFTS_BUCKET` を未設定でも動作します。
 
 ### 起動

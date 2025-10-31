@@ -198,6 +198,107 @@ class Job(BaseModel):
     created_at: datetime
     updated_at: datetime
     payload: JobCreate
+
+
+class LineRecipientType(str, Enum):
+    user = "user"
+    group = "group"
+    room = "room"
+
+
+class LineRecipient(BaseModel):
+    type: LineRecipientType
+    identifier: str
+    label: Optional[str] = None
+
+
+class Store(BaseModel):
+    id: str
+    name: str
+    line_recipient: Optional[LineRecipient] = None
+    timezone: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class Cast(BaseModel):
+    id: str
+    name: str
+    store_id: Optional[str] = None
+    line_recipient: Optional[LineRecipient] = None
+    additional_recipients: List[LineRecipient] = Field(default_factory=list)
+    is_active: bool = True
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ChatEventBase(BaseModel):
+    cast_id: str
+    store_id: Optional[str] = None
+    sender_name: Optional[str] = None
+    customer_name: Optional[str] = None
+    message: str
+    channel: Optional[str] = None
+    unread_count: Optional[int] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ChatEventCreate(ChatEventBase):
+    event_id: Optional[str] = None
+    sent_at: datetime
+
+
+class ChatEvent(ChatEventBase):
+    id: str
+    sent_at: datetime
+    recorded_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ReservationStatus(str, Enum):
+    pending = "pending"
+    confirmed = "confirmed"
+    cancelled = "cancelled"
+    completed = "completed"
+
+
+class ReservationEventBase(BaseModel):
+    cast_id: str
+    store_id: Optional[str] = None
+    customer_name: Optional[str] = None
+    customer_contact: Optional[str] = None
+    menu_name: Optional[str] = None
+    channel: Optional[str] = None
+    note: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ReservationEventCreate(ReservationEventBase):
+    reservation_id: str
+    event_id: Optional[str] = None
+    start_at: datetime
+    end_at: Optional[datetime] = None
+    status: ReservationStatus = ReservationStatus.pending
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ReservationEvent(ReservationEventBase):
+    id: str
+    reservation_id: str
+    start_at: datetime
+    end_at: Optional[datetime] = None
+    status: ReservationStatus
+    created_at: datetime
+    recorded_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ChatNotificationResponse(BaseModel):
+    event: ChatEvent
+    recipients: List[LineRecipient] = Field(default_factory=list)
+    errors: List[str] = Field(default_factory=list)
+
+
+class ReservationNotificationResponse(BaseModel):
+    event: ReservationEvent
+    recipients: List[LineRecipient] = Field(default_factory=list)
+    errors: List[str] = Field(default_factory=list)
     workflow_execution_id: Optional[str] = None
     draft_id: Optional[str] = None
 
