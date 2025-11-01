@@ -17,6 +17,10 @@ class QualityEngine:
         style = draft_content.get("style_violations", [])
         requires_expert = draft_content.get("is_ymyl", False)
         missing_citations = [c["id"] for c in claims]
+        citation_count = int(draft_content.get("citation_count", 0))
+        numeric_facts = int(draft_content.get("numeric_facts", 0))
+        banned_hits = [str(item) for item in draft_content.get("ng_phrases", [])]
+        abstract_hits = [str(item) for item in draft_content.get("abstract_phrases", [])]
 
         rubric_payload = draft_content.get("rubric", {}) if isinstance(draft_content, dict) else {}
         rubric_summary = draft_content.get("rubric_summary") if isinstance(draft_content, dict) else None
@@ -33,6 +37,10 @@ class QualityEngine:
             citations_missing=missing_citations,
             rubric_scores=rubric_scores,
             rubric_summary=rubric_summary,
+            citation_count=citation_count,
+            numeric_facts=numeric_facts,
+            banned_phrase_hits=banned_hits,
+            abstract_phrase_hits=abstract_hits,
         )
 
     def bundle(

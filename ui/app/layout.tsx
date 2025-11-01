@@ -26,6 +26,12 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               <a href="/preview" className="hover:text-primary">
                 プレビュー
               </a>
+              <a href="/rewrite" className="hover:text-primary">
+                部分リライト
+              </a>
+              <a href="/benchmarks" className="hover:text-primary">
+                ベンチマーク
+              </a>
               <a href="/prompts" className="hover:text-primary">
                 プロンプト管理
               </a>

@@ -19,8 +19,11 @@ class Settings(BaseSettings):
     default_prompt_version: str = Field(default="v1", alias="DEFAULT_PROMPT_VERSION")
     seed: int = Field(default=42, alias="GENERATION_SEED")
 
+    llm_provider: str = Field(default="openai", alias="LLM_PROVIDER")
     openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
     openai_model: str = Field(default="gpt-4o", alias="OPENAI_MODEL")
+    anthropic_api_key: Optional[str] = Field(default=None, alias="ANTHROPIC_API_KEY")
+    anthropic_model: str = Field(default="claude-3-5-sonnet-20240620", alias="ANTHROPIC_MODEL")
 
 
 @lru_cache

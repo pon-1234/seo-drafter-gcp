@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import ValidationError
 
 from ..core.config import get_settings
 from ..models import (
     APIError,
+    BenchmarkRun,
     DraftApproveRequest,
     DraftBundle,
     DraftListItem,
@@ -24,13 +27,18 @@ from ..models import (
     PersonaTemplateUpdate,
     PromptVersion,
     PromptVersionCreate,
+    RewriteRequest,
+    RewriteResponse,
     WriterPersona,
+    QualityKpiResponse,
 )
 from ..services.firestore import FirestoreRepository
 from ..services.gcs import DraftStorage
 from ..services.quality import QualityEngine
 from ..services.workflow import WorkflowLauncher
+from ..services.benchmark import BenchmarkService
 from ..services.project_settings import load_project_settings
+from shared.style import NG_PHRASES, ABSTRACT_PATTERNS
 
 try:
     from ..services.openai_gateway import OpenAIGateway
@@ -56,11 +64,18 @@ def get_ai_gateway():
         )
 
     settings = get_settings()
+    provider = (settings.llm_provider or "openai").lower()
+    if provider not in {"openai", "anthropic"}:
+        logger.warning("Unsupported LLM provider '%s', falling back to openai", provider)
+        provider = "openai"
+    model = settings.openai_model if provider == "openai" else settings.anthropic_model or settings.openai_model
 
     try:
         return OpenAIGateway(
             api_key=settings.openai_api_key,
-            model=settings.openai_model,
+            model=model,
+            provider=provider,
+            anthropic_api_key=settings.anthropic_api_key,
         )
     except Exception as exc:
         logger.error("OpenAI initialization failed: %s (type: %s)", str(exc), type(exc).__name__)
@@ -225,10 +240,126 @@ def create_job(
         "reference_media": reference_media,
         "project_template_id": resolved_payload_dict.get("project_template_id"),
     }
+    if payload.llm:
+        launch_payload["llm"] = payload.llm.model_dump(exclude_none=True)
+    if payload.benchmark_plan:
+        launch_payload["benchmark_plan"] = [cfg.model_dump(exclude_none=True) for cfg in payload.benchmark_plan]
     execution_id = workflow.launch(job_id, launch_payload)
     if execution_id:
         job = store.update_job(job_id, workflow_execution_id=execution_id, status=JobStatus.running) or job
     return job
+
+
+@router.post("/api/benchmarks/run", response_model=BenchmarkRun, responses={400: {"model": APIError}})
+def run_benchmark(
+    payload: JobCreate,
+    store: FirestoreRepository = Depends(get_firestore),
+    ai_gateway=Depends(get_ai_gateway),
+) -> BenchmarkRun:
+    if not payload.benchmark_plan:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="benchmark_plan must contain at least one LLM configuration",
+        )
+
+    settings = get_settings()
+    project_defaults = load_project_settings(settings.project_id)
+
+    default_writer_payload = project_defaults.get("writer_persona", {})
+    writer_persona = payload.writer_persona or (
+        WriterPersona(**default_writer_payload) if default_writer_payload else None
+    )
+    preferred_sources = payload.preferred_sources or project_defaults.get("preferred_sources", [])
+    reference_media = payload.reference_media or project_defaults.get("reference_media", [])
+
+    persona = payload.persona_override or ai_gateway.generate_persona(
+        PersonaDeriveRequest(
+            primary_keyword=payload.primary_keyword,
+            supporting_keywords=payload.supporting_keywords,
+            article_type=payload.article_type,
+            intended_cta=payload.intended_cta,
+            persona_brief=payload.persona_brief,
+        )
+    )
+
+    resolved_payload_dict = payload.model_dump()
+    resolved_payload_dict["writer_persona"] = writer_persona.model_dump() if writer_persona else None
+    resolved_payload_dict["preferred_sources"] = preferred_sources
+    resolved_payload_dict["reference_media"] = reference_media
+
+    resolved_payload = JobCreate(**resolved_payload_dict)
+
+    benchmark_service = BenchmarkService(store)
+    result = benchmark_service.run(
+        resolved_payload,
+        persona=persona,
+        writer_persona=writer_persona,
+    )
+    return result
+
+
+@router.get("/api/benchmarks", response_model=List[BenchmarkRun])
+def list_benchmarks(limit: int = 20, store: FirestoreRepository = Depends(get_firestore)) -> List[BenchmarkRun]:
+    runs = []
+    for item in store.list_benchmark_runs(limit=limit):
+        try:
+            runs.append(BenchmarkRun(**item))
+        except ValidationError:
+            logger.warning("Skipping malformed benchmark entry: %s", item.get("id"))
+    return runs
+
+
+@router.post("/api/tools/rewrite", response_model=RewriteResponse, responses={400: {"model": APIError}})
+def rewrite_text(
+    payload: RewriteRequest,
+    ai_gateway=Depends(get_ai_gateway),
+) -> RewriteResponse:
+    settings = get_settings()
+    gateway = ai_gateway
+
+    if payload.llm:
+        llm_cfg = payload.llm
+        provider_value = getattr(llm_cfg.provider, "value", llm_cfg.provider)
+        provider = str(provider_value).lower()
+        if provider not in {"openai", "anthropic"}:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported LLM provider")
+        model = llm_cfg.model or (settings.openai_model if provider == "openai" else settings.anthropic_model)
+        gateway = OpenAIGateway(
+            api_key=settings.openai_api_key,
+            model=model,
+            provider=provider,
+            anthropic_api_key=settings.anthropic_api_key,
+        )
+
+    system_message = (
+        "あなたは編集者です。以下の文章を指示に従ってリライトしてください。"
+        "誇張・あいまいな表現を排除し、根拠が不明瞭な部分は条件付きの表現に変更します。"
+        "事実関係は維持しつつ読みやすく整形し、必要であれば文を分割または補足してください。"
+    )
+    user_message = f"指示: {payload.instruction}\n---\n原文:\n{payload.text}"
+
+    try:
+        result = gateway.generate_with_grounding(
+            messages=[
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": user_message},
+            ],
+            temperature=0.2,
+            max_tokens=800,
+        )
+    except Exception as exc:  # pragma: no cover - depends on external API
+        logger.exception("Rewrite generation failed: %s", exc)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Rewrite generation failed") from exc
+
+    rewritten = (result.get("text") or "").strip()
+    detected_ng = [phrase for phrase in NG_PHRASES if phrase and phrase in rewritten]
+    detected_abstract = [phrase for phrase in ABSTRACT_PATTERNS if phrase and phrase in rewritten]
+
+    return RewriteResponse(
+        rewritten_text=rewritten,
+        detected_ng_phrases=detected_ng,
+        detected_abstract_phrases=detected_abstract,
+    )
 
 
 @router.get("/api/jobs/{job_id}", response_model=Job, responses={404: {"model": APIError}})
@@ -366,6 +497,19 @@ def persist_draft(
     quality_path = store.save_artifact(draft_id, "quality.json", quality_snapshot)
 
     firestore_repo.update_job(payload.job_id, status=JobStatus.completed)
+    firestore_repo.record_quality_snapshot(
+        {
+            "draft_id": draft_id,
+            "job_id": payload.job_id,
+            "created_at": datetime.utcnow().isoformat(),
+            "duplication_score": quality_snapshot.get("similarity"),
+            "citation_count": quality_snapshot.get("citation_count"),
+            "numeric_facts": quality_snapshot.get("numeric_facts"),
+            "ng_hits": quality_snapshot.get("ng_phrases", []),
+            "abstract_hits": quality_snapshot.get("abstract_phrases", []),
+            "style_violations": quality_snapshot.get("style_violations", []),
+        }
+    )
 
     paths = {
         "outline": outline_path,
@@ -453,3 +597,33 @@ def approve_draft(
         if url and (url.startswith('http://') or url.startswith('https://')):
             signed_urls[key] = url
     return quality.bundle(draft_id, paths, metadata, quality_payload, signed_urls=signed_urls or None)
+
+
+@router.get("/api/analytics/quality-kpis", response_model=QualityKpiResponse)
+def get_quality_kpis(limit: int = 100, store: FirestoreRepository = Depends(get_firestore)) -> QualityKpiResponse:
+    snapshots = store.list_quality_snapshots(limit=limit)
+    if not snapshots:
+        return QualityKpiResponse(
+            sample_size=0,
+            avg_duplication=0.0,
+            avg_citation_count=0.0,
+            avg_numeric_facts=0.0,
+            ng_phrase_rate=0.0,
+            abstract_phrase_rate=0.0,
+        )
+
+    sample = len(snapshots)
+    avg_duplication = sum(float(snapshot.get("duplication_score") or 0.0) for snapshot in snapshots) / sample
+    avg_citation_count = sum(int(snapshot.get("citation_count") or 0) for snapshot in snapshots) / sample
+    avg_numeric_facts = sum(int(snapshot.get("numeric_facts") or 0) for snapshot in snapshots) / sample
+    ng_phrase_rate = sum(1 for snapshot in snapshots if snapshot.get("ng_hits")) / sample
+    abstract_phrase_rate = sum(1 for snapshot in snapshots if snapshot.get("abstract_hits")) / sample
+
+    return QualityKpiResponse(
+        sample_size=sample,
+        avg_duplication=avg_duplication,
+        avg_citation_count=avg_citation_count,
+        avg_numeric_facts=avg_numeric_facts,
+        ng_phrase_rate=ng_phrase_rate,
+        abstract_phrase_rate=abstract_phrase_rate,
+    )

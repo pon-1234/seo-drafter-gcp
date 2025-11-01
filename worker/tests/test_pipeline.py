@@ -53,6 +53,11 @@ class TestDraftGenerationPipeline:
             reference_media=[],
             project_template_id=None,
             prompt_layers={},
+            llm_provider="openai",
+            llm_model="gpt-4o",
+            llm_temperature=0.7,
+            serp_snapshot=[],
+            serp_gap_topics=[],
         )
         payload = {"primary_keyword": "SEO対策"}
 
@@ -89,6 +94,11 @@ class TestDraftGenerationPipeline:
             reference_media=[],
             project_template_id=None,
             prompt_layers={},
+            llm_provider="openai",
+            llm_model="gpt-4o",
+            llm_temperature=0.7,
+            serp_snapshot=[],
+            serp_gap_topics=[],
         )
 
         meta = pipeline.generate_meta(payload, context)
@@ -135,6 +145,11 @@ class TestDraftGenerationPipeline:
             reference_media=[],
             project_template_id=None,
             prompt_layers={},
+            llm_provider="openai",
+            llm_model="gpt-4o",
+            llm_temperature=0.7,
+            serp_snapshot=[],
+            serp_gap_topics=[],
         )
 
         quality = pipeline.evaluate_quality(draft, context)

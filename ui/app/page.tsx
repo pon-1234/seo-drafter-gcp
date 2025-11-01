@@ -25,6 +25,16 @@ const sections = [
     title: 'ペルソナスタジオ',
     description: '自動生成されたペルソナJSONを確認し、上書き・ロックします。',
     href: '/persona'
+  },
+  {
+    title: '部分リライト',
+    description: '原文と指示を入力して、過剰表現を除いた案を生成。',
+    href: '/rewrite'
+  },
+  {
+    title: 'ベンチマーク比較',
+    description: '複数LLMでの生成品質をAB比較し、推奨モデルを把握します。',
+    href: '/benchmarks'
   }
 ];
 

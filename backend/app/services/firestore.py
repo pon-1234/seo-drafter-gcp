@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -42,6 +43,8 @@ class FirestoreRepository:
         self._client = firestore.Client(project=settings.project_id) if firestore else None
         self._jobs: Dict[str, Job] = {}
         self._prompts: Dict[str, Dict[str, PromptVersion]] = {}
+        self._benchmarks: Dict[str, Dict[str, Any]] = {}
+        self._quality_snapshots: List[Dict[str, Any]] = []
         self._persona_templates: Dict[str, Dict[str, Any]] = {
             "b2b-saas-akari": {
                 "id": "b2b-saas-akari",
@@ -322,3 +325,57 @@ class FirestoreRepository:
             self._persona_templates.pop(template_id)
             removed = True
         return removed
+
+    # Benchmarks
+    def save_benchmark_run(self, run_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        if self._client:
+            doc_ref = self._client.document(self._doc_path("benchmarks", run_id))
+            doc_ref.set(payload)
+        else:
+            self._benchmarks[run_id] = payload
+        return payload
+
+    def get_benchmark_run(self, run_id: str) -> Optional[Dict[str, Any]]:
+        if self._client:
+            doc_ref = self._client.document(self._doc_path("benchmarks", run_id))
+            try:
+                snapshot = doc_ref.get()
+            except gcloud_exceptions.NotFound:  # pragma: no cover
+                return None
+            if not snapshot.exists:
+                return None
+            return snapshot.to_dict()
+        return self._benchmarks.get(run_id)
+
+    def list_benchmark_runs(self, limit: int = 20) -> List[Dict[str, Any]]:
+        if self._client:
+            collection = self._collection("benchmarks")
+            if not collection:
+                return []
+            query = collection.order_by("created_at", direction="DESCENDING").limit(limit)
+            snapshots = query.stream()
+            return [snapshot.to_dict() for snapshot in snapshots]
+        runs = list(self._benchmarks.values())
+        runs.sort(key=lambda item: item.get("created_at") or "", reverse=True)
+        return runs[:limit]
+
+    # Quality snapshots
+    def record_quality_snapshot(self, snapshot: Dict[str, Any]) -> None:
+        snapshot_id = snapshot.get("id") or str(uuid.uuid4())
+        snapshot["id"] = snapshot_id
+        if self._client:
+            doc_ref = self._client.document(self._doc_path("quality_snapshots", snapshot_id))
+            doc_ref.set(snapshot)
+        else:
+            self._quality_snapshots.append(dict(snapshot))
+
+    def list_quality_snapshots(self, limit: int = 100) -> List[Dict[str, Any]]:
+        if self._client:
+            collection = self._collection("quality_snapshots")
+            if not collection:
+                return []
+            query = collection.order_by("created_at", direction="DESCENDING").limit(limit)
+            return [snapshot.to_dict() for snapshot in query.stream()]
+        snapshots = list(self._quality_snapshots)
+        snapshots.sort(key=lambda item: item.get("created_at") or "", reverse=True)
+        return snapshots[:limit]

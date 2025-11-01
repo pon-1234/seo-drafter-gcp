@@ -30,6 +30,11 @@ class OutputFormat(str, Enum):
     html = "html"
 
 
+class LLMProvider(str, Enum):
+    openai = "openai"
+    anthropic = "anthropic"
+
+
 class JobStatus(str, Enum):
     pending = "pending"
     running = "running"
@@ -168,6 +173,37 @@ class HeadingDirective(BaseModel):
     headings: List[str] = Field(default_factory=list, description="指定する見出しのリスト (mode=manual の場合)")
 
 
+
+
+class LLMConfig(BaseModel):
+    provider: LLMProvider = LLMProvider.openai
+    model: Optional[str] = None
+    temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
+    top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    max_output_tokens: Optional[int] = Field(default=None, ge=128, le=8192)
+    label: Optional[str] = Field(default=None, description="UI 表示用の任意ラベル")
+
+
+
+class SerpResult(BaseModel):
+    url: Optional[str] = None
+    title: Optional[str] = None
+    summary: Optional[str] = None
+    key_points: List[str] = Field(default_factory=list)
+
+
+class RewriteRequest(BaseModel):
+    text: str
+    instruction: str
+    llm: Optional[LLMConfig] = None
+
+
+class RewriteResponse(BaseModel):
+    rewritten_text: str
+    detected_ng_phrases: List[str] = Field(default_factory=list)
+    detected_abstract_phrases: List[str] = Field(default_factory=list)
+
+
 class JobCreate(BaseModel):
     primary_keyword: str
     supporting_keywords: List[str] = Field(default_factory=list)
@@ -190,6 +226,9 @@ class JobCreate(BaseModel):
     preferred_sources: List[str] = Field(default_factory=list)
     reference_media: List[str] = Field(default_factory=list)
     project_template_id: Optional[str] = None
+    llm: Optional[LLMConfig] = None
+    benchmark_plan: List[LLMConfig] = Field(default_factory=list, description="比較用のLLM候補一覧")
+    serp_snapshot: List[SerpResult] = Field(default_factory=list)
 
 
 class Job(BaseModel):
@@ -210,6 +249,10 @@ class DraftQualitySignals(BaseModel):
     citations_missing: List[str]
     rubric_scores: Dict[str, str] = Field(default_factory=dict)
     rubric_summary: Optional[str] = None
+    citation_count: int = 0
+    numeric_facts: int = 0
+    banned_phrase_hits: List[str] = Field(default_factory=list)
+    abstract_phrase_hits: List[str] = Field(default_factory=list)
 
 
 class DraftPersistenceRequest(BaseModel):
@@ -257,6 +300,39 @@ class DraftListResponse(BaseModel):
     """Response containing list of drafts."""
     drafts: List[DraftListItem]
     total: int
+
+
+class BenchmarkVariantResult(BaseModel):
+    variant_id: str
+    llm: LLMConfig
+    draft_id: str
+    processing_seconds: float
+    word_count: int
+    citation_count: int
+    quality: DraftQualitySignals
+    style_flags: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    excerpt: str
+
+
+class BenchmarkRun(BaseModel):
+    id: str
+    primary_keyword: str
+    article_type: ArticleType
+    intent: Optional[IntentType] = None
+    prompt_version: Optional[str] = None
+    created_at: datetime
+    variants: List[BenchmarkVariantResult]
+    aggregate_metrics: Dict[str, Any] = Field(default_factory=dict)
+
+
+class QualityKpiResponse(BaseModel):
+    sample_size: int
+    avg_duplication: float
+    avg_citation_count: float
+    avg_numeric_facts: float
+    ng_phrase_rate: float
+    abstract_phrase_rate: float
 
 
 class APIError(BaseModel):

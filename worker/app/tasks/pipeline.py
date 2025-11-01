@@ -6,7 +6,9 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+
 from shared.internal_links import InternalLinkRepository
+from shared.style import NG_PHRASES, ABSTRACT_PATTERNS
 from shared.project_defaults import get_project_defaults
 
 # OpenAI Gateway is now local to worker
@@ -43,6 +45,11 @@ class PipelineContext:
     reference_media: List[str]
     project_template_id: Optional[str]
     prompt_layers: Dict[str, str]
+    llm_provider: str
+    llm_model: str
+    llm_temperature: float
+    serp_snapshot: List[Dict[str, Any]]
+    serp_gap_topics: List[str]
 
 
 class DraftGenerationPipeline:
@@ -51,28 +58,149 @@ class DraftGenerationPipeline:
     def __init__(self) -> None:
         self.settings = get_settings()
         self.ai_gateway = None
+        self._active_llm: Dict[str, Any] = {"provider": None, "model": None, "temperature": None}
 
         if not OpenAIGateway:
             logger.error("OpenAI gateway implementation is not available")
         else:
             try:
-                logger.info(
-                    "Initializing OpenAI with API key: %s..., model: %s",
-                    self.settings.openai_api_key[:20] if self.settings.openai_api_key else "None",
-                    self.settings.openai_model,
-                )
-                self.ai_gateway = OpenAIGateway(
-                    api_key=self.settings.openai_api_key,
-                    model=self.settings.openai_model,
-                )
-                logger.info("Successfully initialized OpenAI gateway (model: %s)", self.settings.openai_model)
+                self._configure_gateway()
             except Exception as exc:
-                logger.error("OpenAI initialization failed: %s (type: %s)", str(exc), type(exc).__name__)
+                logger.error("LLM initialization failed: %s (type: %s)", str(exc), type(exc).__name__)
                 import traceback
 
                 logger.error("Full traceback: %s", traceback.format_exc())
 
         self.link_repository = InternalLinkRepository()
+
+    def _default_model_for_provider(self, provider: str) -> str:
+        if provider == "anthropic" and self.settings.anthropic_model:
+            return self.settings.anthropic_model
+        return self.settings.openai_model
+
+    def _configure_gateway(self, override: Optional[Dict[str, Any]] = None) -> None:
+        provider = (override or {}).get("provider") or self.settings.llm_provider
+        provider = str(provider).lower()
+        if provider not in {"openai", "anthropic"}:
+            raise ValueError(f"Unsupported LLM provider: {provider}")
+
+        model = (override or {}).get("model") or self._default_model_for_provider(provider)
+        temperature = float((override or {}).get("temperature") or 0.7)
+
+        if (
+            self.ai_gateway
+            and self._active_llm["provider"] == provider
+            and self._active_llm["model"] == model
+            and self._active_llm["temperature"] == temperature
+        ):
+            return
+
+        if not OpenAIGateway:
+            raise RuntimeError("LLM gateway implementation unavailable")
+
+        logger.info("Configuring LLM gateway provider=%s model=%s temperature=%.2f", provider, model, temperature)
+        self.ai_gateway = OpenAIGateway(
+            api_key=self.settings.openai_api_key,
+            model=model,
+            search_enabled=True,
+            provider=provider,
+            anthropic_api_key=self.settings.anthropic_api_key,
+        )
+        self._active_llm = {"provider": provider, "model": model, "temperature": temperature}
+
+    @staticmethod
+    def _normalize_serp_snapshot(raw_snapshot: Any) -> List[Dict[str, Any]]:
+        results: List[Dict[str, Any]] = []
+        if not raw_snapshot:
+            return results
+        if isinstance(raw_snapshot, dict):
+            iterable = [raw_snapshot]
+        elif isinstance(raw_snapshot, list):
+            iterable = raw_snapshot
+        else:
+            iterable = []
+
+        for entry in iterable:
+            if isinstance(entry, str):
+                url = entry.strip()
+                if url:
+                    results.append({
+                        "url": url,
+                        "title": url,
+                        "summary": "",
+                        "key_points": [],
+                    })
+                continue
+            if not isinstance(entry, dict):
+                continue
+            url = str(entry.get("url") or "").strip()
+            title = str(entry.get("title") or "").strip() or url or "SERP Result"
+            summary = str(entry.get("summary") or entry.get("description") or "").strip()
+            raw_points = entry.get("key_points") or entry.get("topics") or []
+            key_points: List[str] = []
+            if isinstance(raw_points, str):
+                key_points = [item.strip() for item in re.split(r"[,、，\n]+", raw_points) if item.strip()]
+            elif isinstance(raw_points, list):
+                key_points = [str(item).strip() for item in raw_points if str(item).strip()]
+            else:
+                key_points = []
+            results.append({
+                "url": url,
+                "title": title,
+                "summary": summary,
+                "key_points": key_points,
+            })
+        return results
+
+    @staticmethod
+    def _derive_serp_gap_topics(
+        serp_snapshot: List[Dict[str, Any]],
+        primary_keyword: str,
+        min_topics: int = 3,
+    ) -> List[str]:
+        from collections import Counter
+
+        counter: Counter[str] = Counter()
+        for result in serp_snapshot:
+            for point in result.get("key_points", []):
+                normalized = point.strip()
+                if normalized:
+                    counter[normalized] += 1
+
+        if not counter:
+            return []
+
+        unique_candidates = [topic for topic, freq in counter.items() if freq <= 1]
+        unique_candidates.sort(key=lambda item: item.lower())
+
+        gaps: List[str] = []
+        for topic in unique_candidates:
+            if topic not in gaps:
+                gaps.append(topic)
+            if len(gaps) >= min_topics:
+                break
+
+        if len(gaps) < min_topics:
+            # supplement with high-signal topics to ensure coverage
+            for topic, _freq in counter.most_common():
+                if topic not in gaps:
+                    gaps.append(topic)
+                if len(gaps) >= min_topics:
+                    break
+
+        # Ensure primary keyword variations are emphasised
+        if primary_keyword and all(primary_keyword not in topic for topic in gaps):
+            gaps.insert(0, f"{primary_keyword} の差別化視点")
+
+        # Deduplicate while preserving order
+        seen = set()
+        ordered: List[str] = []
+        for topic in gaps:
+            if topic in seen:
+                continue
+            seen.add(topic)
+            ordered.append(topic)
+        return ordered[: max(min_topics, 5)]
 
     def estimate_intent(self, payload: Dict) -> str:
         requested_intent = payload.get("intent")
@@ -103,10 +231,7 @@ class DraftGenerationPipeline:
 
     @staticmethod
     def _build_quest_title(primary_keyword: str) -> str:
-        return (
-            f"{primary_keyword}で成果を掴むQUESTガイド"
-            "（Question・Understand・Evidence・Solution・Takeaway）"
-        )
+        return f"{primary_keyword}の実務ガイド: 結論と成功プロセス"
 
     def _outline_from_manual(self, context: PipelineContext, prompt: Dict) -> Dict:
         sections = []
@@ -133,6 +258,18 @@ class DraftGenerationPipeline:
             section.setdefault("estimated_words", budget)
             for h3 in section.get("h3", []):
                 h3.setdefault("estimated_words", max(int(budget / max(len(section.get("h3", [])) or 1, 1)), 120))
+        for gap_topic in context.serp_gap_topics[:5]:
+            template_sections.append(
+                {
+                    "text": f"{gap_topic}の差別化と未カバー情報",
+                    "purpose": "Gap",
+                    "h3": [
+                        {"text": f"{gap_topic}の現状データと根拠", "purpose": "Gap"},
+                        {"text": f"{gap_topic}で提示する具体的な打ち手", "purpose": "Gap"},
+                    ],
+                    "estimated_words": budget,
+                }
+            )
         return {
             "title": self._build_quest_title(keyword),
             "h2": template_sections,
@@ -141,189 +278,212 @@ class DraftGenerationPipeline:
     def _article_type_template(self, article_type: str, keyword: str) -> List[Dict[str, Any]]:
         information_template = [
             {
-                "text": f"{keyword}で解決できる課題と得られる成果（QUESTのQ/U）",
-                "purpose": "Lead",
+                "text": f"結論: {keyword}で実現できる成果と次のアクション",
+                "purpose": "Summary",
                 "h3": [
-                    {"text": "現場の風景が浮かぶ課題シーン（視覚）", "purpose": "Lead"},
-                    {"text": "成果が耳に届く成功の声（聴覚）", "purpose": "Lead"},
+                    {"text": "最優先で押さえるべき成功条件", "purpose": "Summary"},
+                    {"text": "効果検証に用いる主要指標", "purpose": "Summary"},
                 ],
             },
             {
-                "text": f"{keyword}がもたらす即効性のあるベネフィット",
-                "purpose": "Know",
+                "text": "背景と課題: なぜいま取り組む必要があるのか",
+                "purpose": "Context",
                 "h3": [
-                    {"text": "導入初期に体感できる改善インパクト", "purpose": "Know"},
-                    {"text": "短期間で可視化できるKPI", "purpose": "Know"},
+                    {"text": "読者が直面する具体的な課題シナリオ", "purpose": "Context"},
+                    {"text": "関連する市場動向・法規制", "purpose": "Context"},
                 ],
             },
             {
-                "text": f"施策連携で描く{keyword}活用マップ",
-                "purpose": "Plan",
+                "text": "根拠と仕組み: 成果を支えるメカニズム",
+                "purpose": "Mechanism",
                 "h3": [
-                    {"text": "主要施策と支援施策の役割分担", "purpose": "Plan"},
-                    {"text": "連携で生まれる顧客体験のイメージ", "purpose": "Plan"},
+                    {"text": "一次情報・統計で裏付ける効果", "purpose": "Mechanism"},
+                    {"text": "仕組み・プロセスの分解と要点", "purpose": "Mechanism"},
                 ],
             },
             {
-                "text": "数値で語る投資対効果と意思決定の裏付け",
-                "purpose": "Measure",
+                "text": "実践ステップ: 再現性のある進め方",
+                "purpose": "Execution",
                 "h3": [
-                    {"text": "最新データで示す成果の伸びしろ", "purpose": "Measure"},
-                    {"text": "意外性のある成功・失敗の事例", "purpose": "Measure"},
+                    {"text": "着手前に整える前提条件", "purpose": "Execution"},
+                    {"text": "ステップごとのタスクと注意点", "purpose": "Execution"},
                 ],
             },
             {
-                "text": "運用チームが感じる導入後の体験価値",
-                "purpose": "Do",
+                "text": "事例と比較: 選択肢ごとの成果と向き・不向き",
+                "purpose": "Case",
                 "h3": [
-                    {"text": "日常オペレーションのビフォーアフター（視覚）", "purpose": "Do"},
-                    {"text": "社内の会話がどう変わるか（聴覚）", "purpose": "Do"},
+                    {"text": "成功事例で確認できた定量的成果", "purpose": "Case"},
+                    {"text": "他手法との違いと併用パターン", "purpose": "Case"},
                 ],
             },
             {
-                "text": "よくあるつまずきとリカバリーの打ち手",
-                "purpose": "Learn",
+                "text": "リスクと対策: つまずきポイントの予防策",
+                "purpose": "Risk",
                 "h3": [
-                    {"text": "失敗の兆候を視覚化するチェック項目", "purpose": "Learn"},
-                    {"text": "体感的に分かる改善アクション", "purpose": "Learn"},
+                    {"text": "よくある失敗パターンと兆候", "purpose": "Risk"},
+                    {"text": "リカバリーと継続改善のチェックリスト", "purpose": "Risk"},
                 ],
             },
             {
-                "text": "CTAで導く次の一手と実務への橋渡し",
+                "text": "まとめと次のステップ",
                 "purpose": "Close",
                 "h3": [
-                    {"text": "読者がすぐ動ける最初のアクション", "purpose": "Close"},
-                    {"text": "長期伴走で得られる継続メリット", "purpose": "Close"},
+                    {"text": "本記事で押さえた主要論点の整理", "purpose": "Close"},
+                    {"text": "今後の検討で確認すべき追加情報", "purpose": "Close"},
                 ],
             },
         ]
 
         comparison_template = [
             {
-                "text": f"{keyword}の選択肢がもたらす顧客便益の比較",
-                "purpose": "Compare",
+                "text": f"結論: {keyword}のおすすめと評価サマリー",
+                "purpose": "Summary",
                 "h3": [
-                    {"text": "課題別に最適解が見える評価軸", "purpose": "Compare"},
-                    {"text": "静かな差を生む意外性ある視点", "purpose": "Compare"},
+                    {"text": "最優先で検討すべき候補と理由", "purpose": "Summary"},
+                    {"text": "評価に用いた基準の概要", "purpose": "Summary"},
                 ],
             },
             {
-                "text": f"{keyword}導入で得られる業種別成果シナリオ",
-                "purpose": "Recommend",
+                "text": "評価軸と選定基準",
+                "purpose": "Criteria",
                 "h3": [
-                    {"text": "少人数チームが体感したスピード感", "purpose": "Recommend"},
-                    {"text": "エンタープライズで聞こえる成功の声", "purpose": "Recommend"},
+                    {"text": "比較項目（機能・価格・サポート等）", "purpose": "Criteria"},
+                    {"text": "用途別に優先すべき指標", "purpose": "Criteria"},
                 ],
             },
             {
-                "text": f"複数施策の連携で見抜く{keyword}×既存施策の相乗効果",
-                "purpose": "Plan",
+                "text": "主要候補の比較表と要点",
+                "purpose": "Comparison",
                 "h3": [
-                    {"text": "主要機能と周辺施策の組み合わせ", "purpose": "Plan"},
-                    {"text": "連携で生まれる顧客体験の視覚化", "purpose": "Plan"},
+                    {"text": "TOP3製品の特徴と向いているケース", "purpose": "Comparison"},
+                    {"text": "定量データで見る強み・弱み", "purpose": "Comparison"},
                 ],
             },
             {
-                "text": "投資判断を後押しする事例とリスク管理",
-                "purpose": "Measure",
+                "text": "用途別・規模別の向き不向き",
+                "purpose": "Segmentation",
                 "h3": [
-                    {"text": "期待を上回った成果のストーリー", "purpose": "Measure"},
-                    {"text": "見落としがちなリスクと回避策", "purpose": "Measure"},
+                    {"text": "小規模チーム／初導入でのポイント", "purpose": "Segmentation"},
+                    {"text": "エンタープライズ・高機能ニーズの場合", "purpose": "Segmentation"},
                 ],
             },
             {
-                "text": "導入後90日のアクションプランとCTA",
+                "text": "価格・導入難易度・サポート体制",
+                "purpose": "Operations",
+                "h3": [
+                    {"text": "料金体系と総コストの比較", "purpose": "Operations"},
+                    {"text": "導入期間・必要リソース・サポート", "purpose": "Operations"},
+                ],
+            },
+            {
+                "text": "検討時の注意点と確認項目",
+                "purpose": "Risk",
+                "h3": [
+                    {"text": "想定されるリスクとチェックリスト", "purpose": "Risk"},
+                    {"text": "契約前に確認すべき一次情報", "purpose": "Risk"},
+                ],
+            },
+            {
+                "text": "まとめと調達に向けた次アクション",
                 "purpose": "Close",
                 "h3": [
-                    {"text": "初期立ち上げの体感ロードマップ", "purpose": "Close"},
-                    {"text": "成果最大化に向けた問いかけ", "purpose": "Close"},
+                    {"text": "意思決定を進めるための準備物", "purpose": "Close"},
+                    {"text": "出典・比較データの参照先", "purpose": "Close"},
                 ],
             },
         ]
 
         ranking_template = [
             {
-                "text": f"{keyword}ランキング上位が提供する価値",
-                "purpose": "Ranking",
+                "text": f"結論: {keyword}ランキングのハイライト",
+                "purpose": "Summary",
                 "h3": [
-                    {"text": "選定基準と実際のインパクト", "purpose": "Ranking"},
-                    {"text": "意外な差別化ポイント", "purpose": "Ranking"},
+                    {"text": "評価方法とTOP3の総評", "purpose": "Summary"},
+                    {"text": "読者タイプ別のおすすめ候補", "purpose": "Summary"},
                 ],
             },
             {
-                "text": "TOP3で体感できる成果ストーリー",
-                "purpose": "Ranking",
+                "text": "ランクインの評価軸とスコア",
+                "purpose": "Criteria",
                 "h3": [
-                    {"text": "第1位：成果を象徴する瞬間描写", "purpose": "Ranking"},
-                    {"text": "第2位：数字で語る強み", "purpose": "Ranking"},
-                    {"text": "第3位：隠れたメリット", "purpose": "Ranking"},
+                    {"text": "主要指標と計測方法", "purpose": "Criteria"},
+                    {"text": "データソースと出典", "purpose": "Criteria"},
                 ],
             },
             {
-                "text": "用途別で選ぶと得られるベネフィット",
-                "purpose": "Recommend",
+                "text": "TOP3の詳細レビュー",
+                "purpose": "Review",
                 "h3": [
-                    {"text": "コスト重視で確保できる成果", "purpose": "Recommend"},
-                    {"text": "機能重視で開ける新しい景色", "purpose": "Recommend"},
+                    {"text": "第1位の概要と導入メリット", "purpose": "Review"},
+                    {"text": "第2位・第3位の特徴と適合シーン", "purpose": "Review"},
                 ],
             },
             {
-                "text": "導入時に体感するギャップとリカバリー",
-                "purpose": "Learn",
+                "text": "用途別・業界別のおすすめ",
+                "purpose": "Segmentation",
                 "h3": [
-                    {"text": "現場で起こりがちな戸惑い", "purpose": "Learn"},
-                    {"text": "改善のためのハンズオン施策", "purpose": "Learn"},
+                    {"text": "コスト重視の選択肢", "purpose": "Segmentation"},
+                    {"text": "機能・サポート重視の選択肢", "purpose": "Segmentation"},
                 ],
             },
             {
-                "text": "CTAで導く次のアクションと伴走",
+                "text": "導入時の注意点とチェックリスト",
+                "purpose": "Risk",
+                "h3": [
+                    {"text": "よくある失敗ポイント", "purpose": "Risk"},
+                    {"text": "契約・運用で確認したい事項", "purpose": "Risk"},
+                ],
+            },
+            {
+                "text": "資料・比較表と次アクション",
                 "purpose": "Close",
                 "h3": [
-                    {"text": "比較表ダウンロードで得られる価値", "purpose": "Close"},
-                    {"text": "相談で実感できるサポート体制", "purpose": "Close"},
+                    {"text": "ダウンロード資料・出典リンク", "purpose": "Close"},
+                    {"text": "社内で検討を進める際のTips", "purpose": "Close"},
                 ],
             },
         ]
 
         closing_template = [
             {
-                "text": f"{keyword}導入後に手にする成果の再確認",
+                "text": f"結論: {keyword}導入で得られる成果の再確認",
+                "purpose": "Summary",
+                "h3": [
+                    {"text": "意思決定を後押しする定量的根拠", "purpose": "Summary"},
+                    {"text": "導入後のロードマップ概要", "purpose": "Summary"},
+                ],
+            },
+            {
+                "text": "導入プロセスと成功条件",
+                "purpose": "Execution",
+                "h3": [
+                    {"text": "短期導入ステップと役割分担", "purpose": "Execution"},
+                    {"text": "成功事例から学ぶ運用ポイント", "purpose": "Execution"},
+                ],
+            },
+            {
+                "text": "ROIとリスクコントロール",
+                "purpose": "Finance",
+                "h3": [
+                    {"text": "投資対効果を示す数値・試算", "purpose": "Finance"},
+                    {"text": "リスクとコンプライアンス対応", "purpose": "Finance"},
+                ],
+            },
+            {
+                "text": "よくある質問と懸念の解消",
+                "purpose": "FAQ",
+                "h3": [
+                    {"text": "コスト・体制・データ連携の疑問", "purpose": "FAQ"},
+                    {"text": "ステークホルダー調整のポイント", "purpose": "FAQ"},
+                ],
+            },
+            {
+                "text": "クロージング: 契約・導入に向けた次アクション",
                 "purpose": "Close",
                 "h3": [
-                    {"text": "ビジネスインパクトを映像で描写", "purpose": "Close"},
-                    {"text": "導入後の体験を会話で想像", "purpose": "Close"},
-                ],
-            },
-            {
-                "text": "導入プロセスと体感できる変化のタイムライン",
-                "purpose": "Plan",
-                "h3": [
-                    {"text": "短期導入ステップと現場の動き", "purpose": "Plan"},
-                    {"text": "定着支援で得られる安心感", "purpose": "Plan"},
-                ],
-            },
-            {
-                "text": "投資対効果の裏付けと説得材料",
-                "purpose": "Measure",
-                "h3": [
-                    {"text": "数値で示すROIと意外な副産物", "purpose": "Measure"},
-                    {"text": "ステークホルダーが納得した理由", "purpose": "Measure"},
-                ],
-            },
-            {
-                "text": "FAQ：導入直前に出てくる不安を解消",
-                "purpose": "Learn",
-                "h3": [
-                    {"text": "コストと運用負荷への回答", "purpose": "Learn"},
-                    {"text": "データと引用で裏付ける安全性", "purpose": "Learn"},
-                ],
-            },
-            {
-                "text": "クロージングメッセージとCTAで行動を後押し",
-                "purpose": "Close",
-                "h3": [
-                    {"text": "読者の背中を押す言葉選び", "purpose": "Close"},
-                    {"text": "顧客便益が一目でわかるCTA案", "purpose": "Close"},
+                    {"text": "比較検討の最終チェックリスト", "purpose": "Close"},
+                    {"text": "社内稟議資料で押さえるべき要素", "purpose": "Close"},
                 ],
             },
         ]
@@ -361,7 +521,10 @@ class DraftGenerationPipeline:
 
         def build_paragraph(heading_text: str, level: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             messages = self._build_prompt_messages(heading_text, level, context)
-            grounded_result = self._generate_grounded_content(messages=messages)
+            grounded_result = self._generate_grounded_content(
+                messages=messages,
+                temperature=context.llm_temperature,
+            )
             claim_id = f"{context.draft_id}-{heading_text}"
             if level == "h2":
                 claim_id = f"{context.draft_id}-{level}-{heading_text}"
@@ -373,7 +536,6 @@ class DraftGenerationPipeline:
             raw_text = grounded_result.get("text")
             normalized_text = raw_text.strip() if isinstance(raw_text, str) else ""
             paragraph_text = normalized_text or f"{heading_text} について解説します。"
-            paragraph_text = self._ensure_benefit_line(paragraph_text, heading_text, context)
 
             paragraph_payload = {
                 "heading": heading_text,
@@ -421,6 +583,7 @@ class DraftGenerationPipeline:
         preferred_sources = ", ".join(context.preferred_sources[:5]) if context.preferred_sources else "優先指定なし"
         preferred_media = ", ".join(context.reference_media[:5]) if context.reference_media else "優先指定なし"
         notation = context.notation_guidelines or "読みやすい日本語（全角を適切に使用）"
+        gap_topics = ", ".join(context.serp_gap_topics[:3]) if context.serp_gap_topics else "差別化指示なし"
 
         reader_profile = self._render_reader_profile(context.persona, reader_tone)
         section_goal = self._derive_section_goal(heading, context)
@@ -440,17 +603,20 @@ class DraftGenerationPipeline:
             "article_type": context.article_type,
             "intent": context.intent,
             "section_goal": section_goal,
+            "gap_topics": gap_topics,
         }
 
         system_template = prompt_layers.get("system") or (
             "あなたは{writer_name}として執筆するシニアSEOライターです。"
-            "読者の共感を呼びつつ、実務で使えるレベルまで噛み砕いて解説してください。"
-            "適切なフレームも活用しながら、VAK（視覚・聴覚・体感）表現で臨場感を高め、"
-            "少なくとも一つ意外性のある知見を盛り込みます。"
+            "誇張・比喩・擬人化を避け、検証可能なデータと一次情報に基づいて解説してください。"
+            "段落は論点→根拠→示唆の順で整理し、事実と推論を明確に区別してください。"
+            "固有名詞・数値は最新情報を用い、出典を欠く推測は記載しないでください。"
         )
         developer_template = prompt_layers.get("developer") or (
-            "出力はMarkdownで、セクション内の最後に必ず『顧客便益: 〜』と締めてください。"
-            "参考情報は [Source: URL] 形式で明記し、優先参照メディアをまず検討してください。"
+            "出力はMarkdown形式で、段落ごとに改行してください。"
+            "各段落に具体例・数値・一次情報のいずれかを含め、根拠の出典を [Source: URL] で明示します。"
+            "出典リンクは2件以上、具体的な数値やケースは3点以上提示してください。"
+            "NG表現（計り知れない・魔法のような 等）は使わず、中立的な語調を保ってください。"
         )
         user_template = prompt_layers.get("user") or (
             "見出し: {heading}\n"
@@ -463,6 +629,7 @@ class DraftGenerationPipeline:
             "スタイル注意事項: {notation}\n"
             "記事タイプ: {article_type}\n"
             "検索意図: {intent}\n"
+            "差別化すべきトピック: {gap_topics}\n"
             "狙い: {section_goal}\n"
         )
 
@@ -496,6 +663,16 @@ class DraftGenerationPipeline:
         return f"{persona_name}が「{heading}」を理解し、{mission_clause}"
 
     @staticmethod
+    def _scan_phrases(texts: List[str], phrases: List[str]) -> List[str]:
+        hits: List[str] = []
+        for phrase in phrases:
+            for text in texts:
+                if phrase and phrase in text:
+                    hits.append(phrase)
+                    break
+        return hits
+
+    @staticmethod
     def _prioritize_sources(sources: List[Dict[str, Any]], preferred_patterns: List[str]) -> List[Dict[str, Any]]:
         if not sources or not preferred_patterns:
             return list(sources)
@@ -509,27 +686,13 @@ class DraftGenerationPipeline:
 
         return sorted(sources, key=score)
 
-    def _ensure_benefit_line(self, text: str, heading: str, context: PipelineContext) -> str:
-        if "顧客便益" in text:
-            return text
-        benefit_sentence = self._compose_benefit_sentence(heading, context)
-        sanitized = text.rstrip()
-        if sanitized:
-            return f"{sanitized}\n顧客便益: {benefit_sentence}"
-        return f"顧客便益: {benefit_sentence}"
-
-    def _compose_benefit_sentence(self, heading: str, context: PipelineContext) -> str:
-        persona_name = context.persona.get("name") or "読者"
-        mission = context.writer_persona.get("mission") if isinstance(context.writer_persona, dict) else None
-        cta = context.cta or "意思決定"
-        mission_phrase = mission or "価値ある行動を後押しする"
-        return f"{persona_name}が{heading}を理解し、{cta}に向けて{mission_phrase}ための自信を得られます。"
-
     def _generate_grounded_content(
         self,
         prompt: Optional[str] = None,
         *,
         messages: Optional[List[Dict[str, str]]] = None,
+        temperature: float = 0.7,
+        max_tokens: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Generate content with the configured OpenAI gateway."""
         if not self.ai_gateway:
@@ -540,7 +703,8 @@ class DraftGenerationPipeline:
             result = self.ai_gateway.generate_with_grounding(
                 prompt=prompt,
                 messages=messages,
-                temperature=0.7,
+                temperature=temperature,
+                max_tokens=max_tokens,
             )
             logger.info("Generated content: %d characters", len(result.get("text", "")))
             return result
@@ -556,7 +720,10 @@ class DraftGenerationPipeline:
         faq_items = []
         for pain in pain_points[:3]:
             prompt = f"{persona_name}が抱える「{pain}」という課題に対する解決策を簡潔に説明してください。"
-            result = self._generate_grounded_content(prompt)
+            result = self._generate_grounded_content(
+                prompt,
+                temperature=context.llm_temperature,
+            )
             raw_answer = result.get("text")
             normalized_answer = raw_answer.strip() if isinstance(raw_answer, str) else ""
             answer_text = normalized_answer or "課題に対する実務的な解決策を提示します。"
@@ -627,6 +794,24 @@ class DraftGenerationPipeline:
         sections = sections_payload.get("sections", []) if isinstance(sections_payload, dict) else []
         paragraphs = [p for section in sections for p in section.get("paragraphs", [])]
         has_citations = any(p.get("citations") for p in paragraphs)
+        unique_citations = set()
+        text_segments: List[str] = []
+        for paragraph in paragraphs:
+            text = paragraph.get("text", "")
+            if isinstance(text, str) and text.strip():
+                text_segments.append(text)
+            for citation in paragraph.get("citations", []):
+                if isinstance(citation, str):
+                    unique_citations.add(citation)
+                elif isinstance(citation, dict):
+                    uri = citation.get("uri") or citation.get("url")
+                    if uri:
+                        unique_citations.add(uri)
+
+        citation_count = len(unique_citations)
+        numeric_facts = sum(len(re.findall(r"\d+[\d,\.]*", text)) for text in text_segments)
+        ng_hits = self._scan_phrases(text_segments, NG_PHRASES)
+        abstract_hits = self._scan_phrases(text_segments, ABSTRACT_PATTERNS)
 
         expected_intent_map = {
             "information": "information",
@@ -648,13 +833,37 @@ class DraftGenerationPipeline:
             f"{context.quality_rubric or 'standard'} rubric: {pass_count}/{len(rubric)} pass"
         )
 
+        style_flags: List[str] = []
+        existing_flags = draft.get("quality", {}).get("style_violations") if isinstance(draft, dict) else []
+        if isinstance(existing_flags, list):
+            style_flags.extend(str(flag) for flag in existing_flags)
+        if duplication_score >= 0.3:
+            style_flags.append("content-too-similar")
+        if citation_count < 2:
+            style_flags.append("insufficient-citations")
+        if numeric_facts < 3:
+            style_flags.append("insufficient-numeric-evidence")
+        style_flags.extend([f"ng_phrase:{phrase}" for phrase in ng_hits])
+        style_flags.extend([f"abstract:{phrase}" for phrase in abstract_hits])
+        # Deduplicate while preserving order
+        seen_flags = set()
+        deduped_flags: List[str] = []
+        for flag in style_flags:
+            if flag not in seen_flags:
+                seen_flags.add(flag)
+                deduped_flags.append(flag)
+
         return {
             "similarity": duplication_score,
             "claims": claims_without_citations,
-            "style_violations": [] if duplication_score < 0.3 else ["content-too-similar"],
+            "style_violations": deduped_flags,
             "is_ymyl": context.article_type in {"information", "comparison"} and not has_citations,
             "rubric": {**rubric, "summary": rubric_summary},
             "rubric_summary": rubric_summary,
+            "citation_count": citation_count,
+            "numeric_facts": numeric_facts,
+            "ng_phrases": ng_hits,
+            "abstract_phrases": abstract_hits,
         }
 
     def bundle_outputs(self, context: PipelineContext, outline: Dict, draft: Dict, meta: Dict, links: List[Dict], quality: Dict) -> Dict:
@@ -687,6 +896,11 @@ class DraftGenerationPipeline:
             metadata["reference_media"] = ", ".join(context.reference_media)
         if context.project_template_id:
             metadata["project_template_id"] = context.project_template_id
+        if context.serp_gap_topics:
+            metadata["serp_gap_topics"] = ", ".join(context.serp_gap_topics)
+        metadata["llm_provider"] = context.llm_provider
+        metadata["llm_model"] = context.llm_model
+        metadata["llm_temperature"] = f"{context.llm_temperature:.2f}"
 
         return {
             "outline": outline,
@@ -700,6 +914,27 @@ class DraftGenerationPipeline:
     def run(self, payload: Dict) -> Dict:
         logger.info("Starting pipeline for job %s", payload["job_id"])
         draft_id = payload.get("draft_id") or str(payload["job_id"]).replace("-", "")[:12]
+        llm_override_raw = payload.get("llm")
+        if isinstance(llm_override_raw, dict):
+            llm_override = dict(llm_override_raw)
+        elif isinstance(llm_override_raw, str):
+            llm_override = {"model": llm_override_raw}
+        else:
+            llm_override = {}
+        try:
+            self._configure_gateway(llm_override)
+        except Exception as exc:
+            logger.error("Failed to configure LLM provider for job %s: %s", payload["job_id"], exc)
+            if not self.ai_gateway:
+                fallback_provider = llm_override.get("provider") or self.settings.llm_provider or "openai"
+                fallback_model = llm_override.get("model") or self._default_model_for_provider(str(fallback_provider).lower())
+                fallback_temperature = float(llm_override.get("temperature") or 0.7)
+                self._active_llm = {
+                    "provider": str(fallback_provider).lower(),
+                    "model": fallback_model,
+                    "temperature": fallback_temperature,
+                }
+
         intent = self.estimate_intent(payload)
         heading_directive = payload.get("heading_directive") or {}
         heading_mode = heading_directive.get("mode", "auto")
@@ -732,6 +967,15 @@ class DraftGenerationPipeline:
             str(item).strip() for item in reference_media_raw if str(item).strip()
         ]
         prompt_layers = project_defaults.get("prompt_layers", {})
+        llm_provider = self._active_llm.get("provider") or self.settings.llm_provider or "openai"
+        llm_model = self._active_llm.get("model") or self._default_model_for_provider(llm_provider)
+        llm_temperature = float(
+            self._active_llm.get("temperature")
+            or llm_override.get("temperature")
+            or 0.7
+        )
+        serp_snapshot = self._normalize_serp_snapshot(payload.get("serp_snapshot"))
+        serp_gap_topics = self._derive_serp_gap_topics(serp_snapshot, payload.get("primary_keyword", ""))
 
         context = PipelineContext(
             job_id=payload["job_id"],
@@ -755,6 +999,11 @@ class DraftGenerationPipeline:
             reference_media=reference_media,
             project_template_id=payload.get("project_template_id"),
             prompt_layers=prompt_layers,
+            llm_provider=llm_provider,
+            llm_model=llm_model,
+            llm_temperature=llm_temperature,
+            serp_snapshot=serp_snapshot,
+            serp_gap_topics=serp_gap_topics,
         )
         outline = self.generate_outline(context, payload)
         citations: List[Dict[str, Any]] = []

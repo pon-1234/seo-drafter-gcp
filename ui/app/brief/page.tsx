@@ -6,11 +6,20 @@ import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { apiFetch } from '@/lib/api';
+import { LLM_PRESETS } from '@/lib/llm-presets';
 
 type DraftIntent = 'information' | 'comparison' | 'transaction';
 type ArticleType = 'information' | 'comparison' | 'ranking' | 'closing';
 type OutputFormat = 'docs' | 'html';
 type HeadingMode = 'auto' | 'manual';
+
+type SerpEntry = {
+  id: number;
+  url: string;
+  title: string;
+  summary: string;
+  keyPoints: string;
+};
 
 type PersonaTemplate = {
   id: string;
@@ -63,10 +72,47 @@ export default function BriefPage() {
   const [personaTemplates, setPersonaTemplates] = useState<PersonaTemplate[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState<boolean>(false);
   const [templateError, setTemplateError] = useState<string | null>(null);
+  const [llmProvider, setLlmProvider] = useState<'openai' | 'anthropic'>('openai');
+  const [llmModel, setLlmModel] = useState<string>('gpt-4o');
+  const [benchmarkModels, setBenchmarkModels] = useState<string[]>([]);
+  const [serpEntries, setSerpEntries] = useState<SerpEntry[]>([
+    { id: Date.now(), url: '', title: '', summary: '', keyPoints: '' }
+  ]);
 
   const articleTypes: ArticleType[] = useMemo(() => ['information', 'comparison', 'ranking', 'closing'], []);
   const outputFormats: OutputFormat[] = useMemo(() => ['docs', 'html'], []);
   const rubrics = useMemo(() => ['standard', 'eeat-focused', 'originality-plus'], []);
+  const providerOptions = useMemo(() => Array.from(new Set(LLM_PRESETS.map((option) => option.provider))), []);
+  const availableModels = useMemo(
+    () => LLM_PRESETS.filter((option) => option.provider === llmProvider),
+    [llmProvider]
+  );
+
+  useEffect(() => {
+    if (!availableModels.some((option) => option.model === llmModel)) {
+      const first = availableModels[0];
+      if (first) {
+        setLlmModel(first.model);
+      }
+    }
+  }, [availableModels, llmModel]);
+
+  const addSerpEntry = () => {
+    setSerpEntries((entries) => [
+      ...entries,
+      { id: Date.now() + Math.floor(Math.random() * 1000), url: '', title: '', summary: '', keyPoints: '' }
+    ]);
+  };
+
+  const updateSerpEntry = (id: number, field: keyof Omit<SerpEntry, 'id'>, value: string) => {
+    setSerpEntries((entries) =>
+      entries.map((entry) => (entry.id === id ? { ...entry, [field]: value } : entry))
+    );
+  };
+
+  const removeSerpEntry = (id: number) => {
+    setSerpEntries((entries) => (entries.length <= 1 ? entries : entries.filter((entry) => entry.id !== id)));
+  };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -198,7 +244,7 @@ export default function BriefPage() {
         : undefined;
 
       const headingModeValue = (form.get('heading_mode') as HeadingMode) || 'auto';
-      const payload = {
+      const payload: Record<string, unknown> = {
         primary_keyword: form.get('primary_keyword'),
         supporting_keywords: parseList(form.get('supporting_keywords')),
         intent: (form.get('intent') as DraftIntent) || undefined,
@@ -224,6 +270,51 @@ export default function BriefPage() {
         project_template_id: ((form.get('project_template_id') as string) || '').trim() || undefined,
       };
 
+      if (llmModel) {
+        payload.llm = {
+          provider: llmProvider,
+          model: llmModel,
+        };
+      }
+
+      if (benchmarkModels.length > 0) {
+        const variants = benchmarkModels
+          .map((id) => {
+            const option = LLM_PRESETS.find((item) => item.id === id);
+            if (!option) return null;
+            return {
+              provider: option.provider,
+              model: option.model,
+              label: option.label,
+            };
+          })
+          .filter(Boolean) as Array<{ provider: string; model: string; label: string }>;
+        if (variants.length > 0) {
+          payload.benchmark_plan = variants;
+        }
+      }
+
+      const serpSnapshot = serpEntries
+        .map((entry) => {
+          const keyPoints = entry.keyPoints
+            .split(/[\n,、，]+/)
+            .map((item) => item.trim())
+            .filter(Boolean);
+          if (!entry.url.trim() && !entry.summary.trim() && keyPoints.length === 0) {
+            return null;
+          }
+          return {
+            url: entry.url.trim() || undefined,
+            title: entry.title.trim() || undefined,
+            summary: entry.summary.trim() || undefined,
+            key_points: keyPoints,
+          };
+        })
+        .filter(Boolean) as Array<Record<string, unknown>>;
+      if (serpSnapshot.length > 0) {
+        payload.serp_snapshot = serpSnapshot;
+      }
+
       const body = await apiFetch<{ id: string }>('api/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -233,6 +324,10 @@ export default function BriefPage() {
       formElement.reset();
       setHeadingMode('auto');
       setSelectedTemplate('');
+      setBenchmarkModels([]);
+      setSerpEntries([{ id: Date.now(), url: '', title: '', summary: '', keyPoints: '' }]);
+      setLlmProvider('openai');
+      setLlmModel('gpt-4o');
     } catch (error) {
       console.error(error);
       setStatus('ジョブ作成に失敗しました。入力内容とバックエンド設定を確認してください。');
@@ -373,6 +468,71 @@ export default function BriefPage() {
           </section>
 
           <section className="space-y-4">
+            <h3 className="text-sm font-semibold text-slate-900">生成モデル設定</h3>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <Label text="プロバイダー" required />
+                <select
+                  value={llmProvider}
+                  onChange={(event) => {
+                    setLlmProvider(event.target.value as 'openai' | 'anthropic');
+                  }}
+                  className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+                >
+                  {providerOptions.map((provider) => (
+                    <option key={provider} value={provider}>
+                      {provider === 'openai' ? 'OpenAI' : 'Anthropic'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <Label text="ベースモデル" required />
+                <select
+                  value={llmModel}
+                  onChange={(event) => setLlmModel(event.target.value)}
+                  className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+                >
+                  {availableModels.map((option) => (
+                    <option key={option.id} value={option.model}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div>
+              <Label text="ベンチマーク対象モデル" />
+              <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm">
+                <p className="text-xs text-slate-500">複数モデルでAB比較したい場合に選択してください（ベースモデルは常に含まれます）。</p>
+                {LLM_PRESETS.map((option) => {
+                  const isBaseModel = option.provider === llmProvider && option.model === llmModel;
+                  const checked = benchmarkModels.includes(option.id);
+                  return (
+                    <label key={option.id} className="flex items-center gap-2 text-slate-700">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4"
+                        checked={checked}
+                        onChange={(event) => {
+                          setBenchmarkModels((prev) =>
+                            event.target.checked ? [...prev, option.id] : prev.filter((id) => id !== option.id)
+                          );
+                        }}
+                        disabled={isBaseModel}
+                      />
+                      <span>
+                        {option.label}
+                        {isBaseModel ? '（ベース設定）' : ''}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          </section>
+
+          <section className="space-y-4">
             <h3 className="text-sm font-semibold text-slate-900">読者ペルソナ</h3>
             <div className="grid gap-4 md:grid-cols-2">
               <div>
@@ -443,6 +603,76 @@ export default function BriefPage() {
                   placeholder="例: 数字と一次情報で裏付け\n意外性のある事例を必ず入れる"
                 />
               </div>
+            </div>
+          </section>
+
+          <section className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-900">SERPスナップ（上位記事の要点）</h3>
+              <Button
+                type="button"
+                variant="secondary"
+                className="px-3 py-1 text-xs"
+                onClick={addSerpEntry}
+              >
+                行を追加
+              </Button>
+            </div>
+            <p className="text-xs text-slate-500">
+              上位表示ページのURL・要約・カバー済みトピックを入力すると、未カバー領域の差別化ポイントが自動反映されます。
+            </p>
+            <div className="space-y-4">
+              {serpEntries.map((entry, index) => (
+                <div key={entry.id} className="rounded-lg border border-slate-200 p-4 shadow-sm">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div>
+                        <Label text={`URL ${index + 1}`} />
+                        <Input
+                          value={entry.url}
+                          onChange={(event) => updateSerpEntry(entry.id, 'url', event.target.value)}
+                          placeholder="https://example.com/article"
+                        />
+                      </div>
+                      <div>
+                        <Label text="タイトル / 媒体名" />
+                        <Input
+                          value={entry.title}
+                          onChange={(event) => updateSerpEntry(entry.id, 'title', event.target.value)}
+                          placeholder="例: 競合A社の料金改定"
+                        />
+                      </div>
+                      <div className="md:col-span-2">
+                        <Label text="要約 / 主な論点" />
+                        <Textarea
+                          rows={3}
+                          value={entry.summary}
+                          onChange={(event) => updateSerpEntry(entry.id, 'summary', event.target.value)}
+                          placeholder="記事で触れている重要ポイントを簡潔にまとめてください。"
+                        />
+                      </div>
+                      <div className="md:col-span-2">
+                        <Label text="カバー済みのトピック（1行につき1項目）" />
+                        <Textarea
+                          rows={3}
+                          value={entry.keyPoints}
+                          onChange={(event) => updateSerpEntry(entry.id, 'keyPoints', event.target.value)}
+                          placeholder={'例:\n料金改定の自動ルール\nOTA最適化の成功事例\n競合比較の要点'}
+                        />
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="px-2 py-1 text-xs text-slate-500 hover:text-red-600"
+                      onClick={() => removeSerpEntry(entry.id)}
+                      disabled={serpEntries.length <= 1}
+                    >
+                      削除
+                    </Button>
+                  </div>
+                </div>
+              ))}
             </div>
           </section>
 
