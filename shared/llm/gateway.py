@@ -228,13 +228,23 @@ class LLMGateway:
         temperature: float,
         max_tokens: Optional[int],
     ) -> str:
+        OPENAI_TEMPERATURE_LOCKED_MODELS = {"gpt-5", "gpt-5-mini", "o4-mini"}
+
         if self.provider == "openai":
             assert OPENAI_AVAILABLE and self._client is not None  # for mypy
             payload: Dict[str, Any] = {
                 "model": self.model,
                 "messages": list(messages),
-                "temperature": temperature,
             }
+            allows_temperature = self.model not in OPENAI_TEMPERATURE_LOCKED_MODELS
+            if allows_temperature:
+                payload["temperature"] = temperature
+            else:
+                logger.debug(
+                    "Model %s enforces default temperature. Requested=%s ignored.",
+                    self.model,
+                    temperature,
+                )
             if max_tokens is not None:
                 payload["max_tokens"] = max_tokens
 
