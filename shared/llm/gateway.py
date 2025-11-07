@@ -247,7 +247,11 @@ class LLMGateway:
                 )
             if max_tokens is not None:
                 if self.model in OPENAI_MAX_COMPLETION_ONLY_MODELS:
-                    payload["max_completion_tokens"] = max_tokens
+                    logger.debug(
+                        "Model %s ignores explicit max_tokens. Requested limit=%s skipped.",
+                        self.model,
+                        max_tokens,
+                    )
                 else:
                     payload["max_tokens"] = max_tokens
 

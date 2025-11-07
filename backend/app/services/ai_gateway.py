@@ -128,7 +128,9 @@ class AIGateway(LLMGateway):
                     "Persona generation temperature ignored for %s (default-only)", self.model
                 )
             if self.model in OPENAI_MAX_COMPLETION_ONLY_MODELS:
-                payload["max_completion_tokens"] = 500
+                logger.debug(
+                    "Persona generation max_tokens ignored for %s (provider default).", self.model
+                )
             else:
                 payload["max_tokens"] = 500
 
