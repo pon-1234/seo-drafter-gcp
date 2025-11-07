@@ -301,6 +301,12 @@ resource "google_project_iam_member" "workflow_tasks" {
   member  = "serviceAccount:${google_service_account.workflow.email}"
 }
 
+# Note: Cloud Run service-level IAM bindings should be applied via deployment scripts
+# or manually, as service names are not known at terraform apply time.
+# Run these commands after deployment:
+# gcloud run services add-iam-policy-binding seo-drafter-worker --region=asia-northeast1 --member="serviceAccount:seo-drafter-workflow@PROJECT_ID.iam.gserviceaccount.com" --role="roles/run.invoker"
+# gcloud run services add-iam-policy-binding seo-drafter-api --region=asia-northeast1 --member="serviceAccount:seo-drafter-workflow@PROJECT_ID.iam.gserviceaccount.com" --role="roles/run.invoker"
+
 # Cloud Workflows
 resource "google_workflows_workflow" "draft_generation" {
   name            = "draft-generation"
