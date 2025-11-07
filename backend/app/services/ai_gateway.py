@@ -21,7 +21,7 @@ class AIGateway(LLMGateway):
         self,
         *,
         provider: str = "openai",
-        model: str = "gpt-4o",
+        model: str = "gpt-5",
         search_enabled: bool = True,
         api_key: Optional[str] = None,
         openai_api_key: Optional[str] = None,

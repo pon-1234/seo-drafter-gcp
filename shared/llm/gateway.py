@@ -107,7 +107,7 @@ class LLMGateway:
         self,
         *,
         provider: str = "openai",
-        model: str = "gpt-4o",
+        model: str = "gpt-5",
         search_enabled: bool = True,
         openai_api_key: Optional[str] = None,
         anthropic_api_key: Optional[str] = None,

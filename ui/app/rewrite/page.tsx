@@ -52,7 +52,7 @@ export default function RewritePage() {
   const [sourceText, setSourceText] = useState('');
   const [instruction, setInstruction] = useState('誇張や比喩を排除し、根拠が明確な表現に整えてください。');
   const [provider, setProvider] = useState<'openai' | 'anthropic'>('openai');
-  const [model, setModel] = useState<string>('gpt-4o');
+  const [model, setModel] = useState<string>('gpt-5');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<RewriteResponsePayload | null>(null);
   const [error, setError] = useState<string | null>(null);

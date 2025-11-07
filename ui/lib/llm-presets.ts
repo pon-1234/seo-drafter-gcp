@@ -6,8 +6,11 @@ export type LlmPreset = {
 };
 
 export const LLM_PRESETS: LlmPreset[] = [
-  { id: 'openai:gpt-4o', provider: 'openai', model: 'gpt-4o', label: 'OpenAI GPT-4o' },
-  { id: 'openai:gpt-4o-mini', provider: 'openai', model: 'gpt-4o-mini', label: 'OpenAI GPT-4o Mini' },
-  { id: 'anthropic:claude-3-5-sonnet-20240620', provider: 'anthropic', model: 'claude-3-5-sonnet-20240620', label: 'Claude 3.5 Sonnet (2024-06-20)' },
-  { id: 'anthropic:claude-3-opus-20240229', provider: 'anthropic', model: 'claude-3-opus-20240229', label: 'Claude 3 Opus' },
+  { id: 'openai:gpt-5', provider: 'openai', model: 'gpt-5', label: 'OpenAI GPT-5' },
+  { id: 'openai:gpt-5-mini', provider: 'openai', model: 'gpt-5-mini', label: 'OpenAI GPT-5 Mini' },
+  { id: 'openai:o4-mini', provider: 'openai', model: 'o4-mini', label: 'OpenAI o4-mini' },
+  { id: 'anthropic:claude-sonnet-4-5', provider: 'anthropic', model: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5' },
+  { id: 'anthropic:claude-sonnet-4-5-20250929', provider: 'anthropic', model: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5 (2025-09-29 snapshot)' },
+  { id: 'anthropic:claude-haiku-4-5', provider: 'anthropic', model: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
+  { id: 'anthropic:claude-opus-4-1', provider: 'anthropic', model: 'claude-opus-4-1', label: 'Claude Opus 4.1' },
 ];

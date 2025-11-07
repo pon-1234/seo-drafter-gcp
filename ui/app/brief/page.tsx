@@ -73,7 +73,7 @@ export default function BriefPage() {
   const [templatesLoading, setTemplatesLoading] = useState<boolean>(false);
   const [templateError, setTemplateError] = useState<string | null>(null);
   const [llmProvider, setLlmProvider] = useState<'openai' | 'anthropic'>('openai');
-  const [llmModel, setLlmModel] = useState<string>('gpt-4o');
+  const [llmModel, setLlmModel] = useState<string>('gpt-5');
   const [benchmarkModels, setBenchmarkModels] = useState<string[]>([]);
   const [serpEntries, setSerpEntries] = useState<SerpEntry[]>([
     { id: Date.now(), url: '', title: '', summary: '', keyPoints: '' }
@@ -327,7 +327,7 @@ export default function BriefPage() {
       setBenchmarkModels([]);
       setSerpEntries([{ id: Date.now(), url: '', title: '', summary: '', keyPoints: '' }]);
       setLlmProvider('openai');
-      setLlmModel('gpt-4o');
+      setLlmModel('gpt-5');
     } catch (error) {
       console.error(error);
       setStatus('ジョブ作成に失敗しました。入力内容とバックエンド設定を確認してください。');

@@ -13,7 +13,7 @@ class OpenAIGateway(LLMGateway):
     def __init__(
         self,
         api_key: Optional[str] = None,
-        model: str = "gpt-4o",
+        model: str = "gpt-5",
         search_enabled: bool = True,
         *,
         provider: str = "openai",

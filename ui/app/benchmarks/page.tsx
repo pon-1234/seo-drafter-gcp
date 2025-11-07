@@ -67,8 +67,8 @@ export default function BenchmarkPage() {
   const [supportingKeywords, setSupportingKeywords] = useState('');
   const [articleType, setArticleType] = useState<ArticleType>('information');
   const [baseProvider, setBaseProvider] = useState<'openai' | 'anthropic'>('openai');
-  const [baseModel, setBaseModel] = useState('gpt-4o');
-  const [selectedVariants, setSelectedVariants] = useState<string[]>(['openai:gpt-4o', 'anthropic:claude-3-5-sonnet-20240620']);
+  const [baseModel, setBaseModel] = useState('gpt-5');
+  const [selectedVariants, setSelectedVariants] = useState<string[]>(['openai:gpt-5', 'anthropic:claude-sonnet-4-5']);
   const [referenceUrls, setReferenceUrls] = useState('');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
