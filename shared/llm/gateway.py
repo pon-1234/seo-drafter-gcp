@@ -29,8 +29,8 @@ except ImportError:  # pragma: no cover - local fallback
 
 SUPPORTED_PROVIDERS = {"openai", "anthropic"}
 
-OPENAI_TEMPERATURE_LOCKED_MODELS = {"gpt-5", "gpt-5-mini", "o4-mini"}
-OPENAI_MAX_COMPLETION_ONLY_MODELS = {"gpt-5", "gpt-5-mini", "o4-mini"}
+OPENAI_TEMPERATURE_LOCKED_MODELS = {"gpt-5", "gpt-5-mini", "o4-mini", "o1-preview", "o1-mini"}
+OPENAI_MAX_COMPLETION_ONLY_MODELS = {"gpt-5", "gpt-5-mini", "o4-mini", "o1-preview", "o1-mini"}
 
 
 @dataclass
