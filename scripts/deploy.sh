@@ -99,6 +99,37 @@ ensure_openai_credentials() {
   exit 1
 }
 
+ensure_anthropic_credentials() {
+  if [[ -n "$ANTHROPIC_API_KEY" ]]; then
+    return
+  fi
+
+  if [[ "$SERVICES" != *"backend"* && "$SERVICES" != *"worker"* ]]; then
+    return
+  fi
+
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "Warning: ANTHROPIC_API_KEY is not set and jq is not installed to reuse it from existing services."
+    return
+  fi
+
+  local existing_key=""
+  local services_to_check=("seo-drafter-api" "seo-drafter-worker")
+  for svc in "${services_to_check[@]}"; do
+    local describe_output
+    if describe_output=$(gcloud run services describe "$svc" --region="$REGION" --format=json 2>/dev/null); then
+      existing_key=$(echo "$describe_output" | jq -r '.spec.template.spec.containers[0].env[] | select(.name=="ANTHROPIC_API_KEY").value' | head -n1)
+      if [[ -n "$existing_key" && "$existing_key" != "null" ]]; then
+        ANTHROPIC_API_KEY="$existing_key"
+        echo "Reusing Anthropic API key from existing $svc deployment."
+        return
+      fi
+    fi
+  done
+
+  echo "Warning: ANTHROPIC_API_KEY is not set. Claude models will not be available."
+}
+
 # Parse command line arguments
 SKIP_BUILD=false
 SERVICES=""
@@ -143,6 +174,7 @@ echo "=== Deploying Cloud Run services ==="
 
 if [[ "$SERVICES" == *"backend"* || "$SERVICES" == *"worker"* ]]; then
   ensure_openai_credentials
+  ensure_anthropic_credentials
 fi
 
 # Get service URLs for environment variables
@@ -150,6 +182,9 @@ if [[ "$SERVICES" == *"backend"* ]]; then
   BACKEND_ENV="GCP_PROJECT=${PROJECT_ID},GCP_REGION=${REGION},DRAFTS_BUCKET=${PROJECT_ID}-drafts,BIGQUERY_DATASET=seo_drafter,WORKFLOW_NAME=draft-generation,WORKFLOW_LOCATION=${REGION},VERTEX_MODEL_PRO=gemini-1.5-pro-002,VERTEX_MODEL_FLASH=gemini-1.5-flash-002"
   if [[ -n "$OPENAI_API_KEY" ]]; then
     BACKEND_ENV+=",OPENAI_API_KEY=${OPENAI_API_KEY}"
+  fi
+  if [[ -n "$ANTHROPIC_API_KEY" ]]; then
+    BACKEND_ENV+=",ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}"
   fi
   if [[ -n "$OPENAI_MODEL" ]]; then
     BACKEND_ENV+=",OPENAI_MODEL=${OPENAI_MODEL}"
@@ -172,6 +207,9 @@ if [[ "$SERVICES" == *"worker"* ]]; then
   WORKER_ENV="GCP_PROJECT=${PROJECT_ID},GCP_REGION=${REGION},BIGQUERY_DATASET=seo_drafter,VERTEX_MODEL_PRO=gemini-1.5-pro-002,VERTEX_MODEL_FLASH=gemini-1.5-flash-002"
   if [[ -n "$OPENAI_API_KEY" ]]; then
     WORKER_ENV+=",OPENAI_API_KEY=${OPENAI_API_KEY}"
+  fi
+  if [[ -n "$ANTHROPIC_API_KEY" ]]; then
+    WORKER_ENV+=",ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}"
   fi
   if [[ -n "$OPENAI_MODEL" ]]; then
     WORKER_ENV+=",OPENAI_MODEL=${OPENAI_MODEL}"
