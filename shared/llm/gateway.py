@@ -230,12 +230,15 @@ class LLMGateway:
     ) -> str:
         if self.provider == "openai":
             assert OPENAI_AVAILABLE and self._client is not None  # for mypy
-            response = self._client.chat.completions.create(
-                model=self.model,
-                messages=list(messages),
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
+            payload: Dict[str, Any] = {
+                "model": self.model,
+                "messages": list(messages),
+                "temperature": temperature,
+            }
+            if max_tokens is not None:
+                payload["max_tokens"] = max_tokens
+
+            response = self._client.chat.completions.create(**payload)
             return response.choices[0].message.content or ""
 
         if self.provider == "anthropic":
