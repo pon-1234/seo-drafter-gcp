@@ -48,6 +48,7 @@ deploy_cloud_run() {
   local service_account=$3
   local env_vars=$4
   local allow_unauthenticated=${5:-"--no-allow-unauthenticated"}
+  local timeout=${6:-300}
 
   echo "Deploying $service to Cloud Run..."
 
@@ -59,7 +60,7 @@ deploy_cloud_run() {
     --set-env-vars="$env_vars" \
     --memory=1Gi \
     --cpu=1 \
-    --timeout=300 \
+    --timeout=$timeout \
     --max-instances=10 \
     $allow_unauthenticated
 
@@ -159,7 +160,8 @@ if [[ "$SERVICES" == *"backend"* ]]; then
     "${REGISTRY}/backend:latest" \
     "seo-drafter-api@${PROJECT_ID}.iam.gserviceaccount.com" \
     "$BACKEND_ENV" \
-    "--allow-unauthenticated"
+    "--allow-unauthenticated" \
+    300
 
   # Get backend URL
   BACKEND_URL=$(gcloud run services describe seo-drafter-api --region=$REGION --format='value(status.url)')
@@ -179,7 +181,9 @@ if [[ "$SERVICES" == *"worker"* ]]; then
     "seo-drafter-worker" \
     "${REGISTRY}/worker:latest" \
     "seo-drafter-worker@${PROJECT_ID}.iam.gserviceaccount.com" \
-    "$WORKER_ENV"
+    "$WORKER_ENV" \
+    "--no-allow-unauthenticated" \
+    600
 
   # Get worker URL
   WORKER_URL=$(gcloud run services describe seo-drafter-worker --region=$REGION --format='value(status.url)')
@@ -199,7 +203,8 @@ if [[ "$SERVICES" == *"ui"* ]]; then
     "${REGISTRY}/ui:latest" \
     "seo-drafter-api@${PROJECT_ID}.iam.gserviceaccount.com" \
     "$UI_ENV" \
-    "--allow-unauthenticated"
+    "--allow-unauthenticated" \
+    300
 
   UI_URL=$(gcloud run services describe seo-drafter-ui --region=$REGION --format='value(status.url)')
   echo "UI URL: $UI_URL"
