@@ -5,6 +5,7 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 from shared.internal_links import InternalLinkRepository
@@ -57,6 +58,7 @@ class DraftGenerationPipeline:
 
     def __init__(self) -> None:
         self.settings = get_settings()
+        self.max_workers = max(int(getattr(self.settings, "llm_max_workers", 4) or 4), 1)
         self.ai_gateway = None
         self._active_llm: Dict[str, Any] = {"provider": None, "model": None, "temperature": None}
 
@@ -515,9 +517,14 @@ class DraftGenerationPipeline:
         return max(int(average / max(section_count, 1)), 200)
 
     def generate_draft(self, context: PipelineContext, outline: Dict, citations: List[Dict]) -> Dict:
-        logger.info("Generating draft for %s with %d outline sections", context.job_id, len(outline.get('h2', [])))
-        sections = []
-        all_claims = []
+        logger.info(
+            "Generating draft for %s with %d outline sections (max_workers=%d)",
+            context.job_id,
+            len(outline.get("h2", [])),
+            self.max_workers,
+        )
+        sections: List[Dict[str, Any]] = []
+        all_claims: List[Dict[str, Any]] = []
 
         def build_paragraph(heading_text: str, level: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             messages = self._build_prompt_messages(heading_text, level, context)
@@ -550,19 +557,57 @@ class DraftGenerationPipeline:
             }
             return paragraph_payload, claim_payload
 
-        for h2 in outline.get("h2", []):
-            paragraphs = []
-            for h3 in h2.get("h3", []):
-                paragraph, claim = build_paragraph(h3["text"], "h3")
-                paragraphs.append(paragraph)
-                all_claims.append(claim)
+        outline_h2 = outline.get("h2", [])
+        if not outline_h2:
+            logger.warning("Outline missing h2 sections for %s", context.job_id)
 
+        future_map = {}
+        h2_paragraphs: Dict[int, List[Tuple[int, Dict[str, Any]]]] = {}
+        h2_claims: Dict[int, List[Dict[str, Any]]] = {}
+
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            for h2_index, h2 in enumerate(outline_h2):
+                h3_list = h2.get("h3", [])
+                if h3_list:
+                    for h3_index, h3 in enumerate(h3_list):
+                        future = executor.submit(build_paragraph, h3["text"], "h3")
+                        future_map[future] = (h2_index, h3_index)
+                else:
+                    future = executor.submit(build_paragraph, h2["text"], "h2")
+                    future_map[future] = (h2_index, 0)
+
+            for future in as_completed(future_map):
+                h2_index, order = future_map[future]
+                try:
+                    paragraph, claim = future.result()
+                except Exception as exc:
+                    logger.exception(
+                        "Paragraph generation failed for job %s section %s: %s",
+                        context.job_id,
+                        h2_index,
+                        exc,
+                    )
+                    paragraph = {
+                        "heading": outline_h2[h2_index]["text"],
+                        "text": "生成に失敗しましたが、要点を後で補完してください。",
+                        "citations": [],
+                        "claim_id": f"{context.draft_id}-fallback-{h2_index}-{order}",
+                    }
+                    claim = {
+                        "id": paragraph["claim_id"],
+                        "text": paragraph["text"],
+                        "citations": [],
+                    }
+                h2_paragraphs.setdefault(h2_index, []).append((order, paragraph))
+                h2_claims.setdefault(h2_index, []).append(claim)
+
+        for h2_index, h2 in enumerate(outline_h2):
+            paragraph_entries = sorted(h2_paragraphs.get(h2_index, []), key=lambda item: item[0])
+            paragraphs = [entry for _order, entry in paragraph_entries]
             if not paragraphs:
-                paragraph, claim = build_paragraph(h2["text"], "h2")
-                paragraphs.append(paragraph)
-                all_claims.append(claim)
-
+                logger.warning("No paragraphs generated for job %s section %s", context.job_id, h2["text"])
             sections.append({"h2": h2["text"], "paragraphs": paragraphs})
+            all_claims.extend(h2_claims.get(h2_index, []))
 
         return {
             "sections": sections,

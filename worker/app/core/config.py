@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     openai_model: str = Field(default="gpt-5", alias="OPENAI_MODEL")
     anthropic_api_key: Optional[str] = Field(default=None, alias="ANTHROPIC_API_KEY")
     anthropic_model: str = Field(default="claude-sonnet-4-5", alias="ANTHROPIC_MODEL")
+    llm_max_workers: int = Field(default=4, alias="LLM_MAX_WORKERS")
 
 
 @lru_cache
