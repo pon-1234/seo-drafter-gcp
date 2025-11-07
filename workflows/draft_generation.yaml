@@ -38,6 +38,7 @@ main:
             quality_rubric: ${event.quality_rubric}
           auth:
             type: OIDC
+            service_account: seo-drafter-workflow@seo-drafter-gcp.iam.gserviceaccount.com
         result: workerResponse
     - persistOutputs:
         call: http.post
@@ -51,5 +52,6 @@ main:
             payload: ${workerResponse.body.result}
           auth:
             type: OIDC
+            service_account: seo-drafter-workflow@seo-drafter-gcp.iam.gserviceaccount.com
     - return:
         return: ${workerResponse.body}
