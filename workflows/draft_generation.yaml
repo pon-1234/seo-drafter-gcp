@@ -14,6 +14,7 @@ main:
           url: ${worker_url + "/run-pipeline"}
           headers:
             Content-Type: application/json
+          timeout: 600s
           body:
             job_id: ${job_id}
             draft_id: ${draft_id}
