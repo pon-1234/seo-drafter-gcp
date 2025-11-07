@@ -183,7 +183,7 @@ if [[ "$SERVICES" == *"worker"* ]]; then
     "seo-drafter-worker@${PROJECT_ID}.iam.gserviceaccount.com" \
     "$WORKER_ENV" \
     "--no-allow-unauthenticated" \
-    600
+    900
 
   # Get worker URL
   WORKER_URL=$(gcloud run services describe seo-drafter-worker --region=$REGION --format='value(status.url)')
