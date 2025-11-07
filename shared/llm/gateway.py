@@ -29,6 +29,9 @@ except ImportError:  # pragma: no cover - local fallback
 
 SUPPORTED_PROVIDERS = {"openai", "anthropic"}
 
+OPENAI_TEMPERATURE_LOCKED_MODELS = {"gpt-5", "gpt-5-mini", "o4-mini"}
+OPENAI_MAX_COMPLETION_ONLY_MODELS = {"gpt-5", "gpt-5-mini", "o4-mini"}
+
 
 @dataclass
 class LLMGenerationResult:
@@ -228,16 +231,13 @@ class LLMGateway:
         temperature: float,
         max_tokens: Optional[int],
     ) -> str:
-        OPENAI_TEMPERATURE_LOCKED_MODELS = {"gpt-5", "gpt-5-mini", "o4-mini"}
-
         if self.provider == "openai":
             assert OPENAI_AVAILABLE and self._client is not None  # for mypy
             payload: Dict[str, Any] = {
                 "model": self.model,
                 "messages": list(messages),
             }
-            allows_temperature = self.model not in OPENAI_TEMPERATURE_LOCKED_MODELS
-            if allows_temperature:
+            if self.model not in OPENAI_TEMPERATURE_LOCKED_MODELS:
                 payload["temperature"] = temperature
             else:
                 logger.debug(
@@ -246,7 +246,10 @@ class LLMGateway:
                     temperature,
                 )
             if max_tokens is not None:
-                payload["max_tokens"] = max_tokens
+                if self.model in OPENAI_MAX_COMPLETION_ONLY_MODELS:
+                    payload["max_completion_tokens"] = max_tokens
+                else:
+                    payload["max_tokens"] = max_tokens
 
             response = self._client.chat.completions.create(**payload)
             return response.choices[0].message.content or ""

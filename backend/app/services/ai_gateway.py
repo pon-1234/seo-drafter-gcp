@@ -7,7 +7,11 @@ import logging
 import re
 from typing import Any, Dict, Optional
 
-from shared.llm import LLMGateway
+from shared.llm import (
+    LLMGateway,
+    OPENAI_MAX_COMPLETION_ONLY_MODELS,
+    OPENAI_TEMPERATURE_LOCKED_MODELS,
+)
 
 from ..models import ArticleType, Persona, PersonaBrief, PersonaDeriveRequest
 
@@ -107,18 +111,28 @@ class AIGateway(LLMGateway):
 
     def _complete_persona_prompt(self, prompt: str) -> str:
         if self.provider == "openai":
-            response = self._client.chat.completions.create(  # type: ignore[operator]
-                model=self.model,
-                messages=[
+            payload: Dict[str, Any] = {
+                "model": self.model,
+                "messages": [
                     {
                         "role": "system",
                         "content": "あなたはB2Bマーケティングのペルソナ設計の専門家です。JSONのみで回答してください。",
                     },
                     {"role": "user", "content": prompt},
                 ],
-                temperature=0.3,
-                max_tokens=500,
-            )
+            }
+            if self.model not in OPENAI_TEMPERATURE_LOCKED_MODELS:
+                payload["temperature"] = 0.3
+            else:
+                logger.debug(
+                    "Persona generation temperature ignored for %s (default-only)", self.model
+                )
+            if self.model in OPENAI_MAX_COMPLETION_ONLY_MODELS:
+                payload["max_completion_tokens"] = 500
+            else:
+                payload["max_tokens"] = 500
+
+            response = self._client.chat.completions.create(**payload)  # type: ignore[operator]
             return response.choices[0].message.content or ""
 
         if self.provider == "anthropic":
