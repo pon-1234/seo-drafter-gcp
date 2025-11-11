@@ -473,21 +473,34 @@ def get_draft(
     metadata = {"status": "preview"}
     if matching_job and matching_job.payload:
         payload = matching_job.payload
-        metadata.update({
+        # Build metadata dict, excluding None values
+        metadata_updates = {
             "job_id": matching_job.id,
-            "created_at": matching_job.created_at.isoformat() if matching_job.created_at else None,
             "primary_keyword": payload.primary_keyword,
             "expertise_level": payload.expertise_level.value if hasattr(payload.expertise_level, 'value') else str(payload.expertise_level),
             "tone": payload.tone.value if hasattr(payload.tone, 'value') else str(payload.tone),
             "article_type": payload.article_type.value if hasattr(payload.article_type, 'value') else str(payload.article_type),
-            "word_count_range": payload.word_count_range,
             "output_format": payload.output_format.value if hasattr(payload.output_format, 'value') else str(payload.output_format),
-            "prompt_version": payload.prompt_version,
-            "intended_cta": payload.intended_cta,
-            "quality_rubric": payload.quality_rubric,
-            "llm_provider": payload.llm.provider.value if payload.llm and hasattr(payload.llm.provider, 'value') else None,
-            "llm_model": payload.llm.model if payload.llm else None,
-        })
+        }
+
+        # Add optional fields only if they are not None
+        if matching_job.created_at:
+            metadata_updates["created_at"] = matching_job.created_at.isoformat()
+        if payload.word_count_range:
+            metadata_updates["word_count_range"] = payload.word_count_range
+        if payload.prompt_version:
+            metadata_updates["prompt_version"] = payload.prompt_version
+        if payload.intended_cta:
+            metadata_updates["intended_cta"] = payload.intended_cta
+        if payload.quality_rubric:
+            metadata_updates["quality_rubric"] = payload.quality_rubric
+        if payload.llm:
+            if hasattr(payload.llm.provider, 'value'):
+                metadata_updates["llm_provider"] = payload.llm.provider.value
+            if payload.llm.model:
+                metadata_updates["llm_model"] = payload.llm.model
+
+        metadata.update(metadata_updates)
 
     return quality.bundle(
         draft_id=draft_id,
