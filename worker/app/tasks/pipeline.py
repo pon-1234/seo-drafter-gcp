@@ -759,11 +759,20 @@ class DraftGenerationPipeline:
         # Select prompt layers based on expertise level
         expertise_layers = get_prompt_layers_for_expertise(context.expertise_level)
 
+        logger.info(
+            "Selecting prompt for expertise_level=%s, tone=%s, heading=%s",
+            context.expertise_level,
+            context.tone,
+            heading
+        )
+
         # Use custom prompt layers if provided, otherwise use expertise-based layers
         if context.prompt_layers and any(context.prompt_layers.values()):
             prompt_layers = context.prompt_layers
+            logger.info("Using custom prompt layers from context")
         else:
             prompt_layers = expertise_layers.to_payload()
+            logger.info("Using expertise-based prompt layers for level: %s", context.expertise_level)
 
         writer = context.writer_persona or {}
         writer_name = writer.get("name") or "シニアSEOライター"

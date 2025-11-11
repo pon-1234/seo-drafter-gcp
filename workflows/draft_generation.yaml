@@ -36,6 +36,14 @@ main:
             reference_urls: ${event.reference_urls}
             output_format: ${event.output_format}
             quality_rubric: ${event.quality_rubric}
+            writer_persona: ${event.writer_persona}
+            preferred_sources: ${event.preferred_sources}
+            reference_media: ${event.reference_media}
+            project_template_id: ${event.project_template_id}
+            llm: ${event.llm}
+            serp_snapshot: ${event.serp_snapshot}
+            expertise_level: ${event.expertise_level}
+            tone: ${event.tone}
           auth:
             type: OIDC
         result: workerResponse
