@@ -290,9 +290,138 @@ function PreviewPageContent() {
             </CardContent>
           </Card>
           <Card>
-            <CardHeader title="メタデータ" />
+            <CardHeader title="生成情報" description="この記事がどのようなパラメータで生成されたか" />
             <CardContent>
-              <pre className="whitespace-pre-wrap text-sm text-slate-700">{JSON.stringify(bundle.metadata, null, 2)}</pre>
+              <div className="space-y-4">
+                {/* 基本情報 */}
+                <div className="space-y-2">
+                  <h4 className="text-sm font-semibold text-slate-800 border-b border-slate-200 pb-1">基本情報</h4>
+                  <div className="grid gap-2 text-sm">
+                    {bundle.metadata.job_id && (
+                      <div className="flex items-start gap-3">
+                        <span className="w-24 flex-shrink-0 text-slate-600">Job ID:</span>
+                        <span className="font-mono text-xs text-slate-900">{bundle.metadata.job_id}</span>
+                      </div>
+                    )}
+                    {bundle.metadata.created_at && (
+                      <div className="flex items-start gap-3">
+                        <span className="w-24 flex-shrink-0 text-slate-600">生成日時:</span>
+                        <span className="text-slate-900">{new Date(bundle.metadata.created_at).toLocaleString('ja-JP')}</span>
+                      </div>
+                    )}
+                    {bundle.metadata.primary_keyword && (
+                      <div className="flex items-start gap-3">
+                        <span className="w-24 flex-shrink-0 text-slate-600">主キーワード:</span>
+                        <span className="font-medium text-slate-900">{bundle.metadata.primary_keyword}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* コンテンツ設定 */}
+                <div className="space-y-2">
+                  <h4 className="text-sm font-semibold text-slate-800 border-b border-slate-200 pb-1">コンテンツ設定</h4>
+                  <div className="grid gap-2 text-sm">
+                    {bundle.metadata.expertise_level && (
+                      <div className="flex items-start gap-3">
+                        <span className="w-24 flex-shrink-0 text-slate-600">専門性:</span>
+                        <span className="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-800">
+                          {bundle.metadata.expertise_level === 'beginner' && '初心者向け'}
+                          {bundle.metadata.expertise_level === 'intermediate' && '中級者向け'}
+                          {bundle.metadata.expertise_level === 'expert' && '専門家向け'}
+                        </span>
+                      </div>
+                    )}
+                    {bundle.metadata.tone && (
+                      <div className="flex items-start gap-3">
+                        <span className="w-24 flex-shrink-0 text-slate-600">トーン:</span>
+                        <span className="inline-flex items-center rounded-full bg-purple-100 px-2.5 py-0.5 text-xs font-medium text-purple-800">
+                          {bundle.metadata.tone === 'casual' && '親しみやすい'}
+                          {bundle.metadata.tone === 'formal' && 'フォーマル'}
+                        </span>
+                      </div>
+                    )}
+                    {bundle.metadata.article_type && (
+                      <div className="flex items-start gap-3">
+                        <span className="w-24 flex-shrink-0 text-slate-600">記事タイプ:</span>
+                        <span className="text-slate-900">{bundle.metadata.article_type}</span>
+                      </div>
+                    )}
+                    {bundle.metadata.word_count_range && (
+                      <div className="flex items-start gap-3">
+                        <span className="w-24 flex-shrink-0 text-slate-600">文字数:</span>
+                        <span className="text-slate-900">{bundle.metadata.word_count_range}</span>
+                      </div>
+                    )}
+                    {bundle.metadata.output_format && (
+                      <div className="flex items-start gap-3">
+                        <span className="w-24 flex-shrink-0 text-slate-600">出力形式:</span>
+                        <span className="text-slate-900">{bundle.metadata.output_format}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* プロンプト・品質設定 */}
+                {(bundle.metadata.prompt_version || bundle.metadata.intended_cta || bundle.metadata.quality_rubric) && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-semibold text-slate-800 border-b border-slate-200 pb-1">プロンプト・品質設定</h4>
+                    <div className="grid gap-2 text-sm">
+                      {bundle.metadata.prompt_version && (
+                        <div className="flex items-start gap-3">
+                          <span className="w-24 flex-shrink-0 text-slate-600">バージョン:</span>
+                          <span className="font-mono text-xs text-slate-900">{bundle.metadata.prompt_version}</span>
+                        </div>
+                      )}
+                      {bundle.metadata.intended_cta && (
+                        <div className="flex items-start gap-3">
+                          <span className="w-24 flex-shrink-0 text-slate-600">意図CTA:</span>
+                          <span className="text-slate-900">{bundle.metadata.intended_cta}</span>
+                        </div>
+                      )}
+                      {bundle.metadata.quality_rubric && (
+                        <div className="flex items-start gap-3">
+                          <span className="w-24 flex-shrink-0 text-slate-600">品質Rubric:</span>
+                          <span className="text-slate-900">{bundle.metadata.quality_rubric}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* LLM設定 */}
+                {(bundle.metadata.llm_provider || bundle.metadata.llm_model) && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-semibold text-slate-800 border-b border-slate-200 pb-1">LLM設定</h4>
+                    <div className="grid gap-2 text-sm">
+                      {bundle.metadata.llm_provider && (
+                        <div className="flex items-start gap-3">
+                          <span className="w-24 flex-shrink-0 text-slate-600">プロバイダー:</span>
+                          <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800">
+                            {bundle.metadata.llm_provider}
+                          </span>
+                        </div>
+                      )}
+                      {bundle.metadata.llm_model && (
+                        <div className="flex items-start gap-3">
+                          <span className="w-24 flex-shrink-0 text-slate-600">モデル:</span>
+                          <span className="font-mono text-xs text-slate-900">{bundle.metadata.llm_model}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* その他のメタデータ（デバッグ用） */}
+                <details className="mt-4">
+                  <summary className="cursor-pointer text-xs text-slate-500 hover:text-slate-700">
+                    すべてのメタデータを表示
+                  </summary>
+                  <pre className="mt-2 whitespace-pre-wrap rounded-md bg-slate-100 p-3 text-xs text-slate-700">
+                    {JSON.stringify(bundle.metadata, null, 2)}
+                  </pre>
+                </details>
+              </div>
             </CardContent>
           </Card>
           <Card>

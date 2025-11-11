@@ -411,8 +411,8 @@ def get_draft(
     # List artifacts from GCS or local store
     artifacts = store.list_artifacts(draft_id)
 
-    # If not found, try to find the job and use job_id as fallback
-    # (older drafts may be stored by job_id instead of draft_id)
+    # Find the job to retrieve generation parameters
+    matching_job = None
     if not artifacts:
         try:
             # Try to find job where draft_id matches
@@ -425,6 +425,13 @@ def get_draft(
                     logger.info("Found draft using job_id %s for draft_id %s", matching_job.id, draft_id)
         except Exception as e:
             logger.warning("Failed to lookup job for draft_id %s: %s", draft_id, e)
+    else:
+        # Artifacts found, now try to find the job for metadata
+        try:
+            jobs = firestore_repo.list_jobs(limit=100)
+            matching_job = next((j for j in jobs if j.draft_id == draft_id), None)
+        except Exception as e:
+            logger.warning("Failed to lookup job metadata for draft_id %s: %s", draft_id, e)
 
     if not artifacts:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found")
@@ -462,10 +469,30 @@ def get_draft(
         if url and (url.startswith('http://') or url.startswith('https://')):
             signed_urls[key] = url
 
+    # Build metadata with generation parameters
+    metadata = {"status": "preview"}
+    if matching_job and matching_job.payload:
+        payload = matching_job.payload
+        metadata.update({
+            "job_id": matching_job.id,
+            "created_at": matching_job.created_at.isoformat() if matching_job.created_at else None,
+            "primary_keyword": payload.primary_keyword,
+            "expertise_level": payload.expertise_level.value if hasattr(payload.expertise_level, 'value') else str(payload.expertise_level),
+            "tone": payload.tone.value if hasattr(payload.tone, 'value') else str(payload.tone),
+            "article_type": payload.article_type.value if hasattr(payload.article_type, 'value') else str(payload.article_type),
+            "word_count_range": payload.word_count_range,
+            "output_format": payload.output_format.value if hasattr(payload.output_format, 'value') else str(payload.output_format),
+            "prompt_version": payload.prompt_version,
+            "intended_cta": payload.intended_cta,
+            "quality_rubric": payload.quality_rubric,
+            "llm_provider": payload.llm.provider.value if payload.llm and hasattr(payload.llm.provider, 'value') else None,
+            "llm_model": payload.llm.model if payload.llm else None,
+        })
+
     return quality.bundle(
         draft_id=draft_id,
         paths=paths,
-        metadata={"status": "preview"},
+        metadata=metadata,
         draft_content=quality_payload,
         signed_urls=signed_urls or None,
         internal_links=links_payload,
