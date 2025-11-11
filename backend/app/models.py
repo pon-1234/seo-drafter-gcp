@@ -35,6 +35,17 @@ class LLMProvider(str, Enum):
     anthropic = "anthropic"
 
 
+class ExpertiseLevel(str, Enum):
+    beginner = "beginner"
+    intermediate = "intermediate"
+    expert = "expert"
+
+
+class ToneStyle(str, Enum):
+    casual = "casual"
+    formal = "formal"
+
+
 class JobStatus(str, Enum):
     pending = "pending"
     running = "running"
@@ -229,6 +240,8 @@ class JobCreate(BaseModel):
     llm: Optional[LLMConfig] = None
     benchmark_plan: List[LLMConfig] = Field(default_factory=list, description="比較用のLLM候補一覧")
     serp_snapshot: List[SerpResult] = Field(default_factory=list)
+    expertise_level: ExpertiseLevel = Field(default=ExpertiseLevel.intermediate, description="読者の専門性レベル")
+    tone: ToneStyle = Field(default=ToneStyle.formal, description="文章のトーン")
 
 
 class Job(BaseModel):

@@ -239,6 +239,8 @@ def create_job(
         "preferred_sources": preferred_sources,
         "reference_media": reference_media,
         "project_template_id": resolved_payload_dict.get("project_template_id"),
+        "expertise_level": payload.expertise_level.value,
+        "tone": payload.tone.value,
     }
     if payload.llm:
         launch_payload["llm"] = payload.llm.model_dump(exclude_none=True)

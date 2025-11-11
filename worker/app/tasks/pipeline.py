@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from shared.internal_links import InternalLinkRepository
 from shared.style import NG_PHRASES, ABSTRACT_PATTERNS
-from shared.project_defaults import get_project_defaults
+from shared.project_defaults import get_project_defaults, get_prompt_layers_for_expertise
 
 # OpenAI Gateway is now local to worker
 try:
@@ -51,6 +51,8 @@ class PipelineContext:
     llm_temperature: float
     serp_snapshot: List[Dict[str, Any]]
     serp_gap_topics: List[str]
+    expertise_level: str  # "beginner" | "intermediate" | "expert"
+    tone: str  # "casual" | "formal"
 
 
 class DraftGenerationPipeline:
@@ -254,7 +256,7 @@ class DraftGenerationPipeline:
 
     def _outline_from_template(self, context: PipelineContext, prompt: Dict) -> Dict:
         keyword = prompt["primary_keyword"]
-        template_sections = self._article_type_template(context.article_type, keyword)
+        template_sections = self._article_type_template(context.article_type, keyword, context.expertise_level)
         budget = self._estimate_section_word_budget(context, len(template_sections) or 1)
         for section in template_sections:
             section.setdefault("estimated_words", budget)
@@ -277,7 +279,133 @@ class DraftGenerationPipeline:
             "h2": template_sections,
         }
 
-    def _article_type_template(self, article_type: str, keyword: str) -> List[Dict[str, Any]]:
+    def _article_type_template(self, article_type: str, keyword: str, expertise_level: str = "intermediate") -> List[Dict[str, Any]]:
+        # Beginner-friendly templates
+        beginner_information_template = [
+            {
+                "text": f"{keyword}とは？初心者でも分かる基本",
+                "purpose": "Introduction",
+                "h3": [
+                    {"text": "簡単に言うとどういうこと？", "purpose": "Simple"},
+                    {"text": "なぜ今注目されているの？", "purpose": "Why"},
+                ],
+            },
+            {
+                "text": f"{keyword}のメリット・デメリット",
+                "purpose": "Pros/Cons",
+                "h3": [
+                    {"text": "実際に使ってみて良かった点", "purpose": "Benefits"},
+                    {"text": "注意すべきポイント", "purpose": "Caution"},
+                ],
+            },
+            {
+                "text": f"初心者におすすめの{keyword}の始め方",
+                "purpose": "HowTo",
+                "h3": [
+                    {"text": "ステップ1: まず最初にやること", "purpose": "Step1"},
+                    {"text": "ステップ2: 次にやること", "purpose": "Step2"},
+                    {"text": "ステップ3: 最後の仕上げ", "purpose": "Step3"},
+                ],
+            },
+            {
+                "text": "実際に試してみた体験談",
+                "purpose": "Experience",
+                "h3": [
+                    {"text": "使ってみた感想", "purpose": "Review"},
+                    {"text": "つまずいたポイントと解決方法", "purpose": "Troubleshooting"},
+                ],
+            },
+            {
+                "text": f"まとめ：{keyword}はこんな人におすすめ",
+                "purpose": "Summary",
+                "h3": [
+                    {"text": "この記事の要点整理", "purpose": "Recap"},
+                    {"text": "次にやってみること", "purpose": "NextAction"},
+                ],
+            },
+        ]
+
+        beginner_comparison_template = [
+            {
+                "text": f"{keyword}を選ぶ時のポイント",
+                "purpose": "Introduction",
+                "h3": [
+                    {"text": "何を基準に選べばいい？", "purpose": "Criteria"},
+                    {"text": "初心者が気をつけるべきこと", "purpose": "Caution"},
+                ],
+            },
+            {
+                "text": "おすすめTOP3の比較",
+                "purpose": "Comparison",
+                "h3": [
+                    {"text": "1位：これが一番おすすめの理由", "purpose": "Top1"},
+                    {"text": "2位・3位：他の選択肢", "purpose": "Top23"},
+                ],
+            },
+            {
+                "text": "使う人別のおすすめ",
+                "purpose": "Segmentation",
+                "h3": [
+                    {"text": "初めて使う人向け", "purpose": "Beginner"},
+                    {"text": "予算を抑えたい人向け", "purpose": "Budget"},
+                ],
+            },
+            {
+                "text": "よくある質問と答え",
+                "purpose": "FAQ",
+                "h3": [
+                    {"text": "料金・費用について", "purpose": "Cost"},
+                    {"text": "使い方・設定について", "purpose": "Usage"},
+                ],
+            },
+            {
+                "text": f"まとめ：{keyword}を始めてみよう",
+                "purpose": "Summary",
+                "h3": [],
+            },
+        ]
+
+        beginner_ranking_template = [
+            {
+                "text": f"{keyword}ランキング結果発表",
+                "purpose": "Summary",
+                "h3": [
+                    {"text": "どうやってランク付けしたの？", "purpose": "Method"},
+                    {"text": "TOP3のハイライト", "purpose": "Highlight"},
+                ],
+            },
+            {
+                "text": "1位から3位の詳しい紹介",
+                "purpose": "Review",
+                "h3": [
+                    {"text": "第1位：おすすめポイントと特徴", "purpose": "Rank1"},
+                    {"text": "第2位・第3位の良いところ", "purpose": "Rank23"},
+                ],
+            },
+            {
+                "text": "あなたに合うのはどれ？",
+                "purpose": "Segmentation",
+                "h3": [
+                    {"text": "こんな人には1位がおすすめ", "purpose": "Type1"},
+                    {"text": "こんな人には2位・3位がおすすめ", "purpose": "Type23"},
+                ],
+            },
+            {
+                "text": "始める前に知っておきたいこと",
+                "purpose": "Tips",
+                "h3": [
+                    {"text": "よくある失敗と対策", "purpose": "Mistakes"},
+                    {"text": "お得に始める方法", "purpose": "Deals"},
+                ],
+            },
+            {
+                "text": "まとめと次のステップ",
+                "purpose": "Close",
+                "h3": [],
+            },
+        ]
+
+        # Intermediate/Expert templates (existing)
         information_template = [
             {
                 "text": f"結論: {keyword}で実現できる成果と次のアクション",
@@ -490,14 +618,25 @@ class DraftGenerationPipeline:
             },
         ]
 
-        templates = {
-            "information": information_template,
-            "comparison": comparison_template,
-            "ranking": ranking_template,
-            "closing": closing_template,
-        }
+        # Select templates based on expertise level
+        if expertise_level == "beginner":
+            templates = {
+                "information": beginner_information_template,
+                "comparison": beginner_comparison_template,
+                "ranking": beginner_ranking_template,
+                "closing": beginner_information_template,  # Use information template for closing
+            }
+        else:
+            # intermediate and expert use the same structure templates
+            templates = {
+                "information": information_template,
+                "comparison": comparison_template,
+                "ranking": ranking_template,
+                "closing": closing_template,
+            }
+
         resolved = []
-        for section in templates.get(article_type, information_template):
+        for section in templates.get(article_type, information_template if expertise_level != "beginner" else beginner_information_template):
             resolved.append(
                 {
                     "text": section["text"],
@@ -617,7 +756,14 @@ class DraftGenerationPipeline:
 
     def _build_prompt_messages(self, heading: str, level: str, context: PipelineContext) -> List[Dict[str, str]]:
         """Build layered prompt messages (system/developer/user)."""
-        prompt_layers = context.prompt_layers or {}
+        # Select prompt layers based on expertise level
+        expertise_layers = get_prompt_layers_for_expertise(context.expertise_level)
+
+        # Use custom prompt layers if provided, otherwise use expertise-based layers
+        if context.prompt_layers and any(context.prompt_layers.values()):
+            prompt_layers = context.prompt_layers
+        else:
+            prompt_layers = expertise_layers.to_payload()
 
         writer = context.writer_persona or {}
         writer_name = writer.get("name") or "シニアSEOライター"
@@ -651,41 +797,13 @@ class DraftGenerationPipeline:
             "gap_topics": gap_topics,
         }
 
-        system_template = prompt_layers.get("system") or (
-            "あなたは{writer_name}として執筆するシニアSEOライターです。"
-            "誇張・比喩・擬人化を避け、検証可能なデータと一次情報に基づいて解説してください。"
-            "段落は論点→根拠→示唆の順で整理し、事実と推論を明確に区別してください。"
-            "固有名詞・数値は最新情報を用い、出典を欠く推測は記載しないでください。"
-        )
-        developer_template = prompt_layers.get("developer") or (
-            "出力はMarkdown形式で、段落ごとに改行してください。"
-            "各段落に具体例・数値・一次情報のいずれかを含め、根拠の出典を [Source: URL] で明示します。"
-            "出典リンクは2件以上、具体的な数値やケースは3点以上提示してください。"
-            "NG表現（計り知れない・魔法のような 等）は使わず、中立的な語調を保ってください。"
-        )
-        user_template = prompt_layers.get("user") or (
-            "見出し: {heading}\n"
-            "セクションレベル: {level}\n"
-            "読者プロフィール: {reader_profile}\n"
-            "CTA: {cta}\n"
-            "参考URL: {references}\n"
-            "優先参照メディア: {preferred_media}\n"
-            "出典候補: {preferred_sources}\n"
-            "スタイル注意事項: {notation}\n"
-            "記事タイプ: {article_type}\n"
-            "検索意図: {intent}\n"
-            "差別化すべきトピック: {gap_topics}\n"
-            "狙い: {section_goal}\n"
-        )
+        system_template = prompt_layers.get("system", "")
+        developer_template = prompt_layers.get("developer", "")
+        user_template = prompt_layers.get("user", "")
 
-        system_message = system_template.format_map(format_payload)
-        developer_message = developer_template.format_map(format_payload)
-        user_message = user_template.format_map(
-            {
-                **format_payload,
-                "primary_keyword": format_payload.get("primary_keyword"),
-            }
-        )
+        system_message = system_template.format_map(format_payload) if system_template else ""
+        developer_message = developer_template.format_map(format_payload) if developer_template else ""
+        user_message = user_template.format_map(format_payload) if user_template else ""
 
         return [
             {"role": "system", "content": system_message},
@@ -1022,6 +1140,10 @@ class DraftGenerationPipeline:
         serp_snapshot = self._normalize_serp_snapshot(payload.get("serp_snapshot"))
         serp_gap_topics = self._derive_serp_gap_topics(serp_snapshot, payload.get("primary_keyword", ""))
 
+        # Get expertise_level and tone from payload
+        expertise_level = payload.get("expertise_level", "intermediate")
+        tone = payload.get("tone", "formal")
+
         context = PipelineContext(
             job_id=payload["job_id"],
             draft_id=draft_id,
@@ -1049,6 +1171,8 @@ class DraftGenerationPipeline:
             llm_temperature=llm_temperature,
             serp_snapshot=serp_snapshot,
             serp_gap_topics=serp_gap_topics,
+            expertise_level=expertise_level,
+            tone=tone,
         )
         outline = self.generate_outline(context, payload)
         citations: List[Dict[str, Any]] = []

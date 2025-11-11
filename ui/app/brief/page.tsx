@@ -63,6 +63,9 @@ const Label = ({ text, required = false }: { text: string; required?: boolean })
   </label>
 );
 
+type ExpertiseLevel = 'beginner' | 'intermediate' | 'expert';
+type ToneStyle = 'casual' | 'formal';
+
 export default function BriefPage() {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -78,6 +81,8 @@ export default function BriefPage() {
   const [serpEntries, setSerpEntries] = useState<SerpEntry[]>([
     { id: Date.now(), url: '', title: '', summary: '', keyPoints: '' }
   ]);
+  const [expertiseLevel, setExpertiseLevel] = useState<ExpertiseLevel>('intermediate');
+  const [tone, setTone] = useState<ToneStyle>('formal');
 
   const articleTypes: ArticleType[] = useMemo(() => ['information', 'comparison', 'ranking', 'closing'], []);
   const outputFormats: OutputFormat[] = useMemo(() => ['docs', 'html'], []);
@@ -268,6 +273,8 @@ export default function BriefPage() {
         preferred_sources: parseList(form.get('preferred_sources'), 'newline'),
         reference_media: parseList(form.get('reference_media'), 'newline'),
         project_template_id: ((form.get('project_template_id') as string) || '').trim() || undefined,
+        expertise_level: expertiseLevel,
+        tone: tone,
       };
 
       if (llmModel) {
@@ -406,6 +413,35 @@ export default function BriefPage() {
                       {type}
                     </option>
                   ))}
+                </select>
+              </div>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <Label text="読者の専門性レベル" required />
+                <select
+                  name="expertise_level"
+                  value={expertiseLevel}
+                  onChange={(e) => setExpertiseLevel(e.target.value as ExpertiseLevel)}
+                  className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  required
+                >
+                  <option value="beginner">初心者向け（分かりやすさ重視）</option>
+                  <option value="intermediate">中級者向け（バランス型）</option>
+                  <option value="expert">専門家向け（データ・根拠重視）</option>
+                </select>
+              </div>
+              <div>
+                <Label text="文章のトーン" required />
+                <select
+                  name="tone"
+                  value={tone}
+                  onChange={(e) => setTone(e.target.value as ToneStyle)}
+                  className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  required
+                >
+                  <option value="casual">親しみやすい・会話的</option>
+                  <option value="formal">フォーマル・ビジネス的</option>
                 </select>
               </div>
             </div>
