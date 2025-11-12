@@ -19,6 +19,7 @@ from ..models import (
     DraftPersistenceRequest,
     Job,
     JobCreate,
+    JobFailureReport,
     JobStatus,
     PersonaDeriveRequest,
     PersonaDeriveResponse,
@@ -538,7 +539,12 @@ def persist_draft(
     links_path = store.save_artifact(draft_id, "links.json", {"suggestions": links})
     quality_path = store.save_artifact(draft_id, "quality.json", quality_snapshot)
 
-    firestore_repo.update_job(payload.job_id, status=JobStatus.completed)
+    firestore_repo.update_job(
+        payload.job_id,
+        status=JobStatus.completed,
+        error_message=None,
+        error_detail=None,
+    )
     firestore_repo.record_quality_snapshot(
         {
             "draft_id": draft_id,
@@ -575,6 +581,25 @@ def persist_draft(
         internal_links=links,
     )
     return bundle
+
+
+@router.post("/internal/jobs/{job_id}/fail", response_model=Job, responses={404: {"model": APIError}})
+def mark_job_failed(
+    job_id: str,
+    payload: Optional[JobFailureReport] = None,
+    store: FirestoreRepository = Depends(get_firestore),
+) -> Job:
+    """Mark a job as failed when downstream processing aborts."""
+    body = payload or JobFailureReport()
+    job = store.update_job(
+        job_id,
+        status=JobStatus.failed,
+        error_message=body.reason,
+        error_detail=body.detail,
+    )
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    return job
 
 
 def _render_markdown(draft: dict) -> str:
@@ -639,6 +664,48 @@ def approve_draft(
         if url and (url.startswith('http://') or url.startswith('https://')):
             signed_urls[key] = url
     return quality.bundle(draft_id, paths, metadata, quality_payload, signed_urls=signed_urls or None)
+
+
+@router.post("/internal/jobs/cleanup-stale")
+def cleanup_stale_jobs(
+    timeout_minutes: int = 30,
+    store: FirestoreRepository = Depends(get_firestore),
+) -> dict:
+    """Mark jobs that have been running for too long as failed.
+
+    Args:
+        timeout_minutes: Jobs running longer than this will be marked as failed (default: 30 minutes)
+    """
+    from datetime import datetime, timedelta
+
+    cutoff_time = datetime.utcnow() - timedelta(minutes=timeout_minutes)
+    jobs = store.list_jobs(limit=100)
+
+    stale_jobs = []
+    for job in jobs:
+        if job.status == JobStatus.running and job.updated_at and job.updated_at < cutoff_time:
+            stale_jobs.append({
+                "job_id": job.id,
+                "updated_at": job.updated_at.isoformat(),
+                "age_minutes": (datetime.utcnow() - job.updated_at).total_seconds() / 60
+            })
+            logger.warning("Marking stale job %s as failed (age: %.1f minutes)",
+                         job.id, (datetime.utcnow() - job.updated_at).total_seconds() / 60)
+            store.update_job(
+                job.id,
+                status=JobStatus.failed,
+                error_message="job_timeout",
+                error_detail={
+                    "note": f"Job exceeded timeout of {timeout_minutes} minutes",
+                    "cleanup_timestamp": datetime.utcnow().isoformat()
+                }
+            )
+
+    return {
+        "cleaned_up": len(stale_jobs),
+        "timeout_minutes": timeout_minutes,
+        "stale_jobs": stale_jobs
+    }
 
 
 @router.get("/api/analytics/quality-kpis", response_model=QualityKpiResponse)

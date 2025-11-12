@@ -1,0 +1,12 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'asia-northeast1-docker.pkg.dev/seo-drafter-gcp/seo-drafter/backend:latest'
+      - '-f'
+      - 'backend/Dockerfile'
+      - '.'
+images:
+  - 'asia-northeast1-docker.pkg.dev/seo-drafter-gcp/seo-drafter/backend:latest'
+timeout: 1200s

@@ -283,10 +283,18 @@ class DraftGenerationPipeline:
         # Beginner-friendly templates
         beginner_information_template = [
             {
-                "text": f"{keyword}とは？初心者でも分かる基本",
+                "text": "30秒で要点：この記事で分かること",
+                "purpose": "Summary",
+                "h3": [
+                    {"text": "一言で言うと", "purpose": "Summary"},
+                    {"text": "最短の始め方3ステップ", "purpose": "Quick"},
+                ],
+            },
+            {
+                "text": f"{keyword}とは？定義と基本",
                 "purpose": "Introduction",
                 "h3": [
-                    {"text": "簡単に言うとどういうこと？", "purpose": "Simple"},
+                    {"text": "分かりやすく説明", "purpose": "Definition"},
                     {"text": "なぜ今注目されているの？", "purpose": "Why"},
                 ],
             },
@@ -299,25 +307,27 @@ class DraftGenerationPipeline:
                 ],
             },
             {
-                "text": f"初心者におすすめの{keyword}の始め方",
+                "text": f"{keyword}の始め方を5ステップで解説",
                 "purpose": "HowTo",
                 "h3": [
-                    {"text": "ステップ1: まず最初にやること", "purpose": "Step1"},
-                    {"text": "ステップ2: 次にやること", "purpose": "Step2"},
-                    {"text": "ステップ3: 最後の仕上げ", "purpose": "Step3"},
+                    {"text": "ステップ1: 目標とゴールを決める", "purpose": "Step1"},
+                    {"text": "ステップ2: 必要な準備をする", "purpose": "Step2"},
+                    {"text": "ステップ3: 実際に始めてみる", "purpose": "Step3"},
+                    {"text": "ステップ4: 結果を確認する", "purpose": "Step4"},
+                    {"text": "ステップ5: 改善を続ける", "purpose": "Step5"},
                 ],
             },
             {
-                "text": "実際に試してみた体験談",
-                "purpose": "Experience",
+                "text": "よくある失敗と対策",
+                "purpose": "Risk",
                 "h3": [
-                    {"text": "使ってみた感想", "purpose": "Review"},
-                    {"text": "つまずいたポイントと解決方法", "purpose": "Troubleshooting"},
+                    {"text": "初心者がつまずきやすいポイント", "purpose": "Mistakes"},
+                    {"text": "失敗を防ぐための注意点", "purpose": "Prevention"},
                 ],
             },
             {
-                "text": f"まとめ：{keyword}はこんな人におすすめ",
-                "purpose": "Summary",
+                "text": f"まとめ：{keyword}を始めてみよう",
+                "purpose": "Close",
                 "h3": [
                     {"text": "この記事の要点整理", "purpose": "Recap"},
                     {"text": "次にやってみること", "purpose": "NextAction"},
@@ -327,7 +337,15 @@ class DraftGenerationPipeline:
 
         beginner_comparison_template = [
             {
-                "text": f"{keyword}を選ぶ時のポイント",
+                "text": "30秒で要点：この記事で分かること",
+                "purpose": "Summary",
+                "h3": [
+                    {"text": "おすすめTOP3の結論", "purpose": "Summary"},
+                    {"text": "選び方の基準", "purpose": "Quick"},
+                ],
+            },
+            {
+                "text": f"{keyword}を選ぶポイントを3軸で解説",
                 "purpose": "Introduction",
                 "h3": [
                     {"text": "何を基準に選べばいい？", "purpose": "Criteria"},
@@ -351,7 +369,7 @@ class DraftGenerationPipeline:
                 ],
             },
             {
-                "text": "よくある質問と答え",
+                "text": "よくある質問に答える",
                 "purpose": "FAQ",
                 "h3": [
                     {"text": "料金・費用について", "purpose": "Cost"},
@@ -360,22 +378,24 @@ class DraftGenerationPipeline:
             },
             {
                 "text": f"まとめ：{keyword}を始めてみよう",
-                "purpose": "Summary",
-                "h3": [],
+                "purpose": "Close",
+                "h3": [
+                    {"text": "次にやってみること", "purpose": "NextAction"},
+                ],
             },
         ]
 
         beginner_ranking_template = [
             {
-                "text": f"{keyword}ランキング結果発表",
+                "text": "30秒で要点：ランキング結果",
                 "purpose": "Summary",
                 "h3": [
-                    {"text": "どうやってランク付けしたの？", "purpose": "Method"},
                     {"text": "TOP3のハイライト", "purpose": "Highlight"},
+                    {"text": "どうやってランク付けしたの？", "purpose": "Method"},
                 ],
             },
             {
-                "text": "1位から3位の詳しい紹介",
+                "text": "1位から3位を詳しく紹介",
                 "purpose": "Review",
                 "h3": [
                     {"text": "第1位：おすすめポイントと特徴", "purpose": "Rank1"},
@@ -391,17 +411,19 @@ class DraftGenerationPipeline:
                 ],
             },
             {
-                "text": "始める前に知っておきたいこと",
-                "purpose": "Tips",
+                "text": "よくある失敗と対策",
+                "purpose": "Risk",
                 "h3": [
-                    {"text": "よくある失敗と対策", "purpose": "Mistakes"},
+                    {"text": "初心者がつまずきやすいポイント", "purpose": "Mistakes"},
                     {"text": "お得に始める方法", "purpose": "Deals"},
                 ],
             },
             {
                 "text": "まとめと次のステップ",
                 "purpose": "Close",
-                "h3": [],
+                "h3": [
+                    {"text": "次にやってみること", "purpose": "NextAction"},
+                ],
             },
         ]
 

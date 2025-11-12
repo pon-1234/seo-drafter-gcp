@@ -176,19 +176,25 @@ class FirestoreRepository:
         return job
 
     def update_job(self, job_id: str, **updates: Any) -> Optional[Job]:
-        current = self.get_job(job_id)
-        if not current:
-            return None
-        data = current.model_dump()
-        data.update(updates)
-        data["updated_at"] = datetime.utcnow()
-        job = Job(**data)
-        if self._client:
-            doc_ref = self._client.document(self._doc_path("jobs", job_id))
-            doc_ref.set(job.model_dump())
-        else:
-            self._jobs[job_id] = job
-        return job
+        try:
+            current = self.get_job(job_id)
+            if not current:
+                logger.warning("update_job: Job %s not found", job_id)
+                return None
+            data = current.model_dump()
+            data.update(updates)
+            data["updated_at"] = datetime.utcnow()
+            job = Job(**data)
+            if self._client:
+                doc_ref = self._client.document(self._doc_path("jobs", job_id))
+                doc_ref.set(job.model_dump())
+                logger.info("update_job: Successfully updated job %s", job_id)
+            else:
+                self._jobs[job_id] = job
+            return job
+        except Exception as exc:
+            logger.exception("update_job: Failed to update job %s: %s", job_id, exc)
+            raise
 
     def get_job(self, job_id: str) -> Optional[Job]:
         if self._client:

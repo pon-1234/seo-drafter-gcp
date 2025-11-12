@@ -252,6 +252,8 @@ class Job(BaseModel):
     payload: JobCreate
     workflow_execution_id: Optional[str] = None
     draft_id: Optional[str] = None
+    error_message: Optional[str] = None
+    error_detail: Optional[Dict[str, Any]] = None
 
 
 class DraftQualitySignals(BaseModel):
@@ -272,6 +274,11 @@ class DraftPersistenceRequest(BaseModel):
     job_id: str
     draft_id: Optional[str] = None
     payload: Dict[str, Any]
+
+
+class JobFailureReport(BaseModel):
+    reason: Optional[str] = None
+    detail: Optional[Dict[str, Any]] = None
 
 
 

@@ -1,0 +1,12 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/seo-drafter-gcp/seo-drafter-worker:latest'
+      - '-f'
+      - 'worker/Dockerfile'
+      - '.'
+images:
+  - 'gcr.io/seo-drafter-gcp/seo-drafter-worker:latest'
+timeout: 1200s

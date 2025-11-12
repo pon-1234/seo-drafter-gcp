@@ -8,56 +8,85 @@ main:
           - project_id: "seo-drafter-gcp"
           - worker_url: "https://seo-drafter-worker-yxk2eqrkvq-an.a.run.app"
           - backend_url: "https://seo-drafter-api-yxk2eqrkvq-an.a.run.app"
-    - callWorker:
-        call: http.post
-        args:
-          url: ${worker_url + "/run-pipeline"}
-          headers:
-            Content-Type: application/json
-          timeout: 900
-          body:
-            job_id: ${job_id}
-            draft_id: ${draft_id}
-            project_id: ${project_id}
-            primary_keyword: ${event.primary_keyword}
-            supporting_keywords: ${event.supporting_keywords}
-            prompt_version: ${event.prompt_version}
-            persona: ${event.persona}
-            intent: ${event.intent}
-            word_count_range: ${event.word_count_range}
-            prohibited_claims: ${event.prohibited_claims}
-            style_guide_id: ${event.style_guide_id}
-            existing_article_ids: ${event.existing_article_ids}
-            article_type: ${event.article_type}
-            intended_cta: ${event.intended_cta}
-            persona_brief: ${event.persona_brief}
-            notation_guidelines: ${event.notation_guidelines}
-            heading_directive: ${event.heading_directive}
-            reference_urls: ${event.reference_urls}
-            output_format: ${event.output_format}
-            quality_rubric: ${event.quality_rubric}
-            writer_persona: ${event.writer_persona}
-            preferred_sources: ${event.preferred_sources}
-            reference_media: ${event.reference_media}
-            project_template_id: ${event.project_template_id}
-            llm: ${event.llm}
-            serp_snapshot: ${event.serp_snapshot}
-            expertise_level: ${event.expertise_level}
-            tone: ${event.tone}
-          auth:
-            type: OIDC
-        result: workerResponse
-    - persistOutputs:
-        call: http.post
-        args:
-          url: ${backend_url + "/internal/drafts"}
-          headers:
-            Content-Type: application/json
-          body:
-            job_id: ${job_id}
-            draft_id: ${draft_id}
-            payload: ${workerResponse.body.result}
-          auth:
-            type: OIDC
-    - return:
-        return: ${workerResponse.body}
+    - pipeline:
+        try:
+          steps:
+            - callWorker:
+                call: http.post
+                args:
+                  url: ${worker_url + "/run-pipeline"}
+                  headers:
+                    Content-Type: application/json
+                  timeout: 1800
+                  body:
+                    job_id: ${job_id}
+                    draft_id: ${draft_id}
+                    project_id: ${project_id}
+                    primary_keyword: ${event.primary_keyword}
+                    supporting_keywords: ${default(map.get(event, "supporting_keywords"), [])}
+                    prompt_version: ${default(map.get(event, "prompt_version"), "v1")}
+                    persona: ${event.persona}
+                    intent: ${default(map.get(event, "intent"), null)}
+                    word_count_range: ${default(map.get(event, "word_count_range"), null)}
+                    prohibited_claims: ${default(map.get(event, "prohibited_claims"), [])}
+                    style_guide_id: ${default(map.get(event, "style_guide_id"), null)}
+                    existing_article_ids: ${default(map.get(event, "existing_article_ids"), [])}
+                    article_type: ${default(map.get(event, "article_type"), "information")}
+                    intended_cta: ${default(map.get(event, "intended_cta"), null)}
+                    persona_brief: ${default(map.get(event, "persona_brief"), null)}
+                    notation_guidelines: ${default(map.get(event, "notation_guidelines"), null)}
+                    heading_directive: ${default(map.get(event, "heading_directive"), null)}
+                    reference_urls: ${default(map.get(event, "reference_urls"), [])}
+                    output_format: ${default(map.get(event, "output_format"), "html")}
+                    quality_rubric: ${default(map.get(event, "quality_rubric"), null)}
+                    writer_persona: ${default(map.get(event, "writer_persona"), null)}
+                    preferred_sources: ${default(map.get(event, "preferred_sources"), [])}
+                    reference_media: ${default(map.get(event, "reference_media"), [])}
+                    project_template_id: ${default(map.get(event, "project_template_id"), null)}
+                    llm: ${default(map.get(event, "llm"), null)}
+                    serp_snapshot: ${default(map.get(event, "serp_snapshot"), [])}
+                    expertise_level: ${default(map.get(event, "expertise_level"), "intermediate")}
+                    tone: ${default(map.get(event, "tone"), "formal")}
+                  auth:
+                    type: OIDC
+                result: workerResponse
+            - persistOutputs:
+                call: http.post
+                args:
+                  url: ${backend_url + "/internal/drafts"}
+                  headers:
+                    Content-Type: application/json
+                  body:
+                    job_id: ${job_id}
+                    draft_id: ${draft_id}
+                    payload: ${workerResponse.body.result}
+                  auth:
+                    type: OIDC
+            - returnSuccess:
+                return: ${workerResponse.body}
+        except:
+          as: e
+          steps:
+            - markJobFailed:
+                try:
+                  call: http.post
+                  args:
+                    url: ${backend_url + "/internal/jobs/" + job_id + "/fail"}
+                    headers:
+                      Content-Type: application/json
+                    body:
+                      reason: ${default(map.get(e, "message"), "workflow_execution_failed")}
+                      detail:
+                        error: ${e}
+                    auth:
+                      type: OIDC
+                except:
+                  as: mark_error
+                  steps:
+                    - logMarkError:
+                        call: sys.log
+                        args:
+                          text: '${"Failed to mark job as failed: " + string(mark_error)}'
+                          severity: WARNING
+            - rethrow:
+                raise: ${e}
