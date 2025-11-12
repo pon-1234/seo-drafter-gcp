@@ -256,20 +256,99 @@ def get_prompt_layers_for_expertise(expertise_level: str) -> PromptLayerDefaults
     return expertise_map.get(expertise_level, INTERMEDIATE_PROMPT_LAYERS)
 
 
-def get_project_defaults(project_id: Optional[str]) -> Dict[str, Any]:
-    """Return defaults for the requested project, or the first registered defaults."""
-    if project_id and project_id in _PROJECT_DEFAULTS:
-        return _PROJECT_DEFAULTS[project_id].to_payload()
-    if _PROJECT_DEFAULTS:
-        # Return the first defaults to keep behaviour deterministic in local dev.
-        return next(iter(_PROJECT_DEFAULTS.values())).to_payload()
-    return {
-        "writer_persona": {},
-        "preferred_sources": [],
-        "reference_media": [],
-        "prompt_layers": {
-            "system": "",
-            "developer": "",
-            "user": "",
+# Expertise-level specific sources and media
+BEGINNER_SOURCES = [
+    "https://www.soumu.go.jp/",  # 総務省（基礎統計・情報通信白書）
+    "https://www.meti.go.jp/",   # 経済産業省（デジタル化の基礎）
+    "https://support.google.com/",  # Google公式ヘルプ（各種ツールの基礎）
+    "https://ja.wikipedia.org/",  # Wikipedia（用語の基本定義）
+]
+
+BEGINNER_MEDIA = [
+    "ferret（初心者向けマーケティングメディア）",
+    "バズ部（SEO・コンテンツマーケティング入門）",
+    "Googleアナリティクス公式ヘルプ",
+    "基礎から学ぶデジタルマーケティング入門サイト",
+]
+
+INTERMEDIATE_SOURCES = [
+    "https://www.meti.go.jp/",
+    "https://www.stat.go.jp/",
+    "https://thinkwithgoogle.com/",
+    "https://support.google.com/analytics/",
+    "https://developers.google.com/",
+]
+
+INTERMEDIATE_MEDIA = [
+    "Think with Google",
+    "ferret（マーケティングメディア）",
+    "Web担当者Forum",
+    "Googleマーケティングプラットフォーム公式ブログ",
+]
+
+EXPERT_SOURCES = [
+    "https://www.meti.go.jp/",
+    "https://www.stat.go.jp/",
+    "https://thinkwithgoogle.com/",
+    "https://www.gartner.com/en",
+    "https://hbr.org/",
+]
+
+EXPERT_MEDIA = [
+    "HubSpotブログ",
+    "Think with Google",
+    "日経クロストレンド",
+    "海外調査レポート（Gartner, McKinsey等）",
+]
+
+
+def get_sources_and_media_for_expertise(expertise_level: str) -> Dict[str, List[str]]:
+    """Return appropriate sources and media based on expertise level."""
+    expertise_map = {
+        "beginner": {
+            "preferred_sources": BEGINNER_SOURCES,
+            "reference_media": BEGINNER_MEDIA,
+        },
+        "intermediate": {
+            "preferred_sources": INTERMEDIATE_SOURCES,
+            "reference_media": INTERMEDIATE_MEDIA,
+        },
+        "expert": {
+            "preferred_sources": EXPERT_SOURCES,
+            "reference_media": EXPERT_MEDIA,
         },
     }
+    return expertise_map.get(expertise_level, expertise_map["intermediate"])
+
+
+def get_project_defaults(project_id: Optional[str], expertise_level: Optional[str] = None) -> Dict[str, Any]:
+    """Return defaults for the requested project, or the first registered defaults.
+
+    Args:
+        project_id: The project ID to get defaults for
+        expertise_level: Optional expertise level to override sources and media
+    """
+    if project_id and project_id in _PROJECT_DEFAULTS:
+        defaults = _PROJECT_DEFAULTS[project_id].to_payload()
+    elif _PROJECT_DEFAULTS:
+        # Return the first defaults to keep behaviour deterministic in local dev.
+        defaults = next(iter(_PROJECT_DEFAULTS.values())).to_payload()
+    else:
+        defaults = {
+            "writer_persona": {},
+            "preferred_sources": [],
+            "reference_media": [],
+            "prompt_layers": {
+                "system": "",
+                "developer": "",
+                "user": "",
+            },
+        }
+
+    # Override sources and media based on expertise level
+    if expertise_level:
+        sources_and_media = get_sources_and_media_for_expertise(expertise_level)
+        defaults["preferred_sources"] = sources_and_media["preferred_sources"]
+        defaults["reference_media"] = sources_and_media["reference_media"]
+
+    return defaults

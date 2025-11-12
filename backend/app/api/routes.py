@@ -185,7 +185,7 @@ def create_job(
     logger.info("Creating job %s", job_id)
 
     settings = get_settings()
-    project_defaults = load_project_settings(settings.project_id)
+    project_defaults = load_project_settings(settings.project_id, payload.expertise_level)
 
     default_writer_payload = project_defaults.get("writer_persona", {})
     writer_persona = payload.writer_persona or (
@@ -266,7 +266,7 @@ def run_benchmark(
         )
 
     settings = get_settings()
-    project_defaults = load_project_settings(settings.project_id)
+    project_defaults = load_project_settings(settings.project_id, payload.expertise_level)
 
     default_writer_payload = project_defaults.get("writer_persona", {})
     writer_persona = payload.writer_persona or (
