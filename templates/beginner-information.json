@@ -1,0 +1,55 @@
+{
+  "template_name": "初心者向け「◯◯とは」記事",
+  "description": "初心者が検索する「◯◯とは」クエリに最適化された入門記事テンプレート。定義、手法、メリデメ、始め方、FAQを網羅。",
+  "expertise_level": "beginner",
+  "tone": "friendly",
+  "article_type": "information",
+  "persona_brief": {
+    "job_role": "これから学び始める初心者",
+    "needs": [
+      "基本の意味",
+      "具体例",
+      "始め方",
+      "FAQ"
+    ]
+  },
+  "writer_persona": {
+    "name": "わかりやすく教える先生",
+    "voice": "やさしく・具体的・専門用語は言い換え付き"
+  },
+  "notation_guidelines": [
+    "1文60字以内を厳守",
+    "専門用語は必ず言い換え＋例を入れる",
+    "段落は3〜4文で簡潔に",
+    "出典は各セクション末尾に1〜2本のみ",
+    "B2B専門用語は避ける"
+  ],
+  "output_format": "docs",
+  "quality_rubric": "standard",
+  "example_keywords": [
+    "デジタルマーケティングとは",
+    "SEOとは",
+    "コンテンツマーケティングとは",
+    "SNSマーケティングとは",
+    "Webマーケティングとは"
+  ],
+  "recommended_structure": {
+    "h2_sections": [
+      "30秒で要点",
+      "◯◯の意味をわかりやすく解説",
+      "◯◯の主な手法と役割（表で比較）",
+      "◯◯のメリット・デメリット",
+      "◯◯を始める5ステップ",
+      "よくある失敗と対処法",
+      "FAQ",
+      "まとめ"
+    ]
+  },
+  "usage_notes": [
+    "primary_keywordには「◯◯とは」形式のキーワードを指定",
+    "reader_personaは初心者向けに設定済み",
+    "writer_personaは親しみやすい先生タイプ",
+    "出典は総務省、経産省、Google公式など基礎的なソースを優先",
+    "セクションごとに400〜600字を目安"
+  ]
+}
