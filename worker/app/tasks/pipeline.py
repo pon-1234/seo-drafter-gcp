@@ -280,47 +280,67 @@ class DraftGenerationPipeline:
         }
 
     def _article_type_template(self, article_type: str, keyword: str, expertise_level: str = "intermediate") -> List[Dict[str, Any]]:
-        # Beginner-friendly templates (simplified for better SEO)
+        # Beginner-friendly templates (optimized for "◯◯とは" search intent)
         beginner_information_template = [
             {
-                "text": "30秒で要点：結論から読む",
+                "text": "30秒で要点",
                 "purpose": "Summary",
                 "h3": [
-                    {"text": "一言定義（120〜160字）", "purpose": "Definition"},
+                    {"text": f"{keyword}の定義（60〜90字）", "purpose": "Definition"},
                     {"text": "この記事で分かること", "purpose": "Overview"},
                 ],
             },
             {
-                "text": f"{keyword}の基礎3要素を理解する",
-                "purpose": "Basics",
+                "text": f"{keyword}の意味をわかりやすく解説",
+                "purpose": "Definition",
                 "h3": [
-                    {"text": "主なチャネルと使い分け", "purpose": "Channels"},
-                    {"text": "成果の測り方", "purpose": "Metrics"},
+                    {"text": "一言で言うと何？", "purpose": "SimpleDefinition"},
+                    {"text": "従来の方法との違い", "purpose": "Difference"},
                 ],
             },
             {
-                "text": "よくある誤解3つと正しい理解",
-                "purpose": "Misconceptions",
+                "text": f"{keyword}の主な手法と役割",
+                "purpose": "Methods",
                 "h3": [
-                    {"text": "誤解1とその理由", "purpose": "Myth1"},
-                    {"text": "誤解2とその理由", "purpose": "Myth2"},
+                    {"text": "代表的な手法5つ（表で比較）", "purpose": "MethodsTable"},
+                    {"text": "それぞれどう使い分ける？", "purpose": "UseCases"},
                 ],
             },
             {
-                "text": f"{keyword}を最短で始める3ステップ",
+                "text": f"{keyword}のメリット・デメリット",
+                "purpose": "ProsCons",
+                "h3": [
+                    {"text": "3つのメリット", "purpose": "Pros"},
+                    {"text": "2つのデメリットと対処法", "purpose": "Cons"},
+                ],
+            },
+            {
+                "text": f"{keyword}を始める5ステップ",
                 "purpose": "HowTo",
                 "h3": [
-                    {"text": "ステップ1: 目標を決める", "purpose": "Step1"},
-                    {"text": "ステップ2: 計測を設定する", "purpose": "Step2"},
-                    {"text": "ステップ3: 改善を回す", "purpose": "Step3"},
+                    {"text": "ステップ1：目標を決める", "purpose": "Step1"},
+                    {"text": "ステップ2：計測の準備をする", "purpose": "Step2"},
+                    {"text": "ステップ3：施策を実行する", "purpose": "Step3"},
+                    {"text": "ステップ4：データを確認する", "purpose": "Step4"},
+                    {"text": "ステップ5：改善を回す", "purpose": "Step5"},
+                ],
+            },
+            {
+                "text": "よくある失敗と対処法",
+                "purpose": "CommonMistakes",
+                "h3": [
+                    {"text": "失敗例1：目標設定のミス", "purpose": "Mistake1"},
+                    {"text": "失敗例2：計測の設定漏れ", "purpose": "Mistake2"},
+                    {"text": "失敗例3：改善が続かない", "purpose": "Mistake3"},
                 ],
             },
             {
                 "text": "よくある質問（FAQ）",
                 "purpose": "FAQ",
                 "h3": [
-                    {"text": "費用・予算について", "purpose": "Cost"},
-                    {"text": "始める前の準備", "purpose": "Prep"},
+                    {"text": "費用はどれくらいかかる？", "purpose": "Cost"},
+                    {"text": "始める前に何が必要？", "purpose": "Prep"},
+                    {"text": "効果が出るまでの期間は？", "purpose": "Timeline"},
                 ],
             },
             {
@@ -328,7 +348,7 @@ class DraftGenerationPipeline:
                 "purpose": "Close",
                 "h3": [
                     {"text": "この記事の要点", "purpose": "Recap"},
-                    {"text": "今すぐできること", "purpose": "Action"},
+                    {"text": "今日からできること", "purpose": "Action"},
                 ],
             },
         ]
