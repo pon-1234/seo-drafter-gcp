@@ -280,57 +280,55 @@ class DraftGenerationPipeline:
         }
 
     def _article_type_template(self, article_type: str, keyword: str, expertise_level: str = "intermediate") -> List[Dict[str, Any]]:
-        # Beginner-friendly templates
+        # Beginner-friendly templates (simplified for better SEO)
         beginner_information_template = [
             {
-                "text": "30秒で要点：この記事で分かること",
+                "text": "30秒で要点：結論から読む",
                 "purpose": "Summary",
                 "h3": [
-                    {"text": "一言で言うと", "purpose": "Summary"},
-                    {"text": "最短の始め方3ステップ", "purpose": "Quick"},
+                    {"text": "一言定義（120〜160字）", "purpose": "Definition"},
+                    {"text": "この記事で分かること", "purpose": "Overview"},
                 ],
             },
             {
-                "text": f"{keyword}とは？定義と基本",
-                "purpose": "Introduction",
+                "text": f"{keyword}の基礎3要素を理解する",
+                "purpose": "Basics",
                 "h3": [
-                    {"text": "分かりやすく説明", "purpose": "Definition"},
-                    {"text": "なぜ今注目されているの？", "purpose": "Why"},
+                    {"text": "主なチャネルと使い分け", "purpose": "Channels"},
+                    {"text": "成果の測り方", "purpose": "Metrics"},
                 ],
             },
             {
-                "text": f"{keyword}のメリット・デメリット",
-                "purpose": "Pros/Cons",
+                "text": "よくある誤解3つと正しい理解",
+                "purpose": "Misconceptions",
                 "h3": [
-                    {"text": "実際に使ってみて良かった点", "purpose": "Benefits"},
-                    {"text": "注意すべきポイント", "purpose": "Caution"},
+                    {"text": "誤解1とその理由", "purpose": "Myth1"},
+                    {"text": "誤解2とその理由", "purpose": "Myth2"},
                 ],
             },
             {
-                "text": f"{keyword}の始め方を5ステップで解説",
+                "text": f"{keyword}を最短で始める3ステップ",
                 "purpose": "HowTo",
                 "h3": [
-                    {"text": "ステップ1: 目標とゴールを決める", "purpose": "Step1"},
-                    {"text": "ステップ2: 必要な準備をする", "purpose": "Step2"},
-                    {"text": "ステップ3: 実際に始めてみる", "purpose": "Step3"},
-                    {"text": "ステップ4: 結果を確認する", "purpose": "Step4"},
-                    {"text": "ステップ5: 改善を続ける", "purpose": "Step5"},
+                    {"text": "ステップ1: 目標を決める", "purpose": "Step1"},
+                    {"text": "ステップ2: 計測を設定する", "purpose": "Step2"},
+                    {"text": "ステップ3: 改善を回す", "purpose": "Step3"},
                 ],
             },
             {
-                "text": "よくある失敗と対策",
-                "purpose": "Risk",
+                "text": "よくある質問（FAQ）",
+                "purpose": "FAQ",
                 "h3": [
-                    {"text": "初心者がつまずきやすいポイント", "purpose": "Mistakes"},
-                    {"text": "失敗を防ぐための注意点", "purpose": "Prevention"},
+                    {"text": "費用・予算について", "purpose": "Cost"},
+                    {"text": "始める前の準備", "purpose": "Prep"},
                 ],
             },
             {
-                "text": f"まとめ：{keyword}を始めてみよう",
+                "text": f"まとめ：{keyword}の次のステップ",
                 "purpose": "Close",
                 "h3": [
-                    {"text": "この記事の要点整理", "purpose": "Recap"},
-                    {"text": "次にやってみること", "purpose": "NextAction"},
+                    {"text": "この記事の要点", "purpose": "Recap"},
+                    {"text": "今すぐできること", "purpose": "Action"},
                 ],
             },
         ]
