@@ -439,10 +439,12 @@ def get_draft(
     if not artifacts:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found")
 
-    # Read quality, links, and draft content
+    # Read quality, links, draft content, and meta data
     quality_payload = {}
     links_payload = []
     draft_content = None
+    meta_payload = {}
+    outline_payload = {}
 
     for filename, full_path in artifacts.items():
         if filename == "quality.json":
@@ -462,6 +464,20 @@ def get_draft(
                     logger.warning("Links payload for %s is not valid JSON", draft_id)
         elif filename == "draft.md":
             draft_content = store.read_artifact(full_path)
+        elif filename == "meta.json":
+            data = store.read_artifact(full_path)
+            if data:
+                try:
+                    meta_payload = json.loads(data)
+                except json.JSONDecodeError:
+                    logger.warning("Meta payload for %s is not valid JSON", draft_id)
+        elif filename == "outline.json":
+            data = store.read_artifact(full_path)
+            if data:
+                try:
+                    outline_payload = json.loads(data)
+                except json.JSONDecodeError:
+                    logger.warning("Outline payload for %s is not valid JSON", draft_id)
 
     # Build paths dict and signed URLs
     paths = artifacts
@@ -504,6 +520,15 @@ def get_draft(
                 metadata_updates["llm_model"] = payload.llm.model
 
         metadata.update(metadata_updates)
+
+    if isinstance(meta_payload, dict):
+        final_title = meta_payload.get("final_title")
+        if final_title:
+            metadata["final_title"] = str(final_title)
+    if isinstance(outline_payload, dict):
+        provisional_title = outline_payload.get("provisional_title") or outline_payload.get("title")
+        if provisional_title:
+            metadata["provisional_title"] = str(provisional_title)
 
     return quality.bundle(
         draft_id=draft_id,
@@ -574,10 +599,20 @@ def persist_draft(
         # Only include HTTP/HTTPS URLs, not gs:// paths
         if url and (url.startswith('http://') or url.startswith('https://')):
             signed_urls[key] = url
+    metadata = {"job_id": payload.job_id, "draft_id": draft_id, "status": "generated"}
+    if isinstance(outline, dict):
+        provisional_title = outline.get("provisional_title") or outline.get("title")
+        if provisional_title:
+            metadata["provisional_title"] = str(provisional_title)
+    if isinstance(meta, dict):
+        final_title = meta.get("final_title")
+        if final_title:
+            metadata["final_title"] = str(final_title)
+
     bundle = quality.bundle(
         draft_id=draft_id,
         paths=paths,
-        metadata={"job_id": payload.job_id, "draft_id": draft_id, "status": "generated"},
+        metadata=metadata,
         draft_content=quality_snapshot,
         signed_urls=signed_urls or None,
         internal_links=links,

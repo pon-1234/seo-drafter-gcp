@@ -236,6 +236,8 @@ class DraftGenerationPipeline:
         reader_note = self._build_reader_note(context)
         if reader_note:
             outline["reader_note"] = reader_note
+        if "provisional_title" not in outline and outline.get("title"):
+            outline["provisional_title"] = outline["title"]
         return outline
 
     def _build_quest_title(self, primary_keyword: str, context: Optional[PipelineContext] = None) -> str:
@@ -264,6 +266,21 @@ class DraftGenerationPipeline:
             fallback = re.sub(r"(?:とは|[?？])+", "", raw_value).strip()
             return fallback or "SEO"
         return cleaned
+
+    @staticmethod
+    def _extract_title_line(raw_text: str) -> str:
+        if not raw_text:
+            return ""
+        for line in raw_text.splitlines():
+            cleaned = line.strip()
+            if not cleaned:
+                continue
+            if cleaned.lower().startswith("title:"):
+                cleaned = cleaned.split(":", 1)[1].strip()
+            cleaned = cleaned.strip("「」\"'“”")
+            if cleaned:
+                return cleaned
+        return raw_text.strip()
 
     def _build_reader_note(self, context: PipelineContext) -> str:
         persona = context.persona or {}
@@ -305,8 +322,10 @@ class DraftGenerationPipeline:
                     "h3": [],
                 }
             )
+        quest_title = self._build_quest_title(prompt["primary_keyword"], context)
         return {
-            "title": self._build_quest_title(prompt["primary_keyword"], context),
+            "title": quest_title,
+            "provisional_title": quest_title,
             "h2": sections,
         }
 
@@ -330,8 +349,10 @@ class DraftGenerationPipeline:
                     "estimated_words": budget,
                 }
             )
+        quest_title = self._build_quest_title(keyword, context)
         return {
-            "title": self._build_quest_title(keyword, context),
+            "title": quest_title,
+            "provisional_title": quest_title,
             "h2": template_sections,
         }
 
@@ -986,23 +1007,99 @@ class DraftGenerationPipeline:
 
         return faq_items
 
-    def generate_meta(self, prompt: Dict, context: PipelineContext) -> Dict:
+    def finalize_title(self, context: PipelineContext, outline: Dict, draft: Dict) -> Dict[str, Any]:
+        provisional_title = str(
+            outline.get("provisional_title")
+            or outline.get("title")
+            or self._build_quest_title(context.primary_keyword, context)
+        )
+        sections_payload: List[Dict[str, Any]] = []
+        if isinstance(draft, dict):
+            if "sections" in draft:
+                sections_payload = draft.get("sections") or []
+            elif isinstance(draft.get("draft"), dict):
+                sections_payload = draft["draft"].get("sections", [])
+
+        key_points: List[str] = []
+        for section in sections_payload:
+            heading = str(section.get("h2") or section.get("heading") or "").strip()
+            snippet = ""
+            paragraphs = section.get("paragraphs", [])
+            if isinstance(paragraphs, list):
+                for paragraph in paragraphs:
+                    text = str(paragraph.get("text") or "").strip()
+                    if text:
+                        snippet = re.sub(r"\s+", " ", text)[:200]
+                        break
+            if heading or snippet:
+                fragment = f"{heading}: {snippet}" if heading and snippet else heading or snippet
+                fragment = fragment.strip()
+                if fragment:
+                    key_points.append(fragment)
+            if len(key_points) >= 3:
+                break
+
+        if not key_points and provisional_title:
+            key_points.append(provisional_title)
+
+        bullet_points = "\n".join(f"- {point}" for point in key_points if point)
+        prompt = (
+            "あなたは検索意図と本文を把握したSEO編集長です。"
+            "以下の情報から、記事の価値を最も正確かつ魅力的に表す日本語タイトルを1つだけ生成してください。\n\n"
+            f"主キーワード: {context.primary_keyword}\n"
+            f"仮タイトル: {provisional_title}\n"
+            f"記事の要点:\n{bullet_points or '- 要点情報なし'}\n\n"
+            "要件:\n"
+            "1. 60文字以内\n"
+            "2. 読者の課題と結論が一文で伝わる\n"
+            "3. キーワードを自然に含め、誇張しすぎない\n\n"
+            "出力: 最終タイトルのみを1行で返す。"
+        )
+
+        generated_text = ""
+        temperature = min(max(context.llm_temperature, 0.1), 0.85)
+        try:
+            result = self._generate_grounded_content(prompt, temperature=temperature)
+            generated_text = result.get("text", "") if isinstance(result, dict) else ""
+        except Exception as exc:
+            logger.warning("Job %s: finalize_title failed (%s)", context.job_id, exc)
+
+        extracted_title = self._extract_title_line(generated_text) if generated_text else ""
+        final_title = extracted_title or provisional_title
+        rationale_source = ", ".join(key_points[:2]) if key_points else "outline情報不足"
+        return {
+            "final_title": final_title,
+            "provisional_title": provisional_title,
+            "title_variants": [],
+            "title_rationale": f"要点: {rationale_source}",
+        }
+
+    def generate_meta(self, prompt: Dict, context: PipelineContext, final_title: Optional[str] = None) -> Dict:
         keyword = prompt["primary_keyword"]
         keyword_surface = self._sanitize_keyword_surface(keyword)
         cta = context.cta or "資料請求はこちら"
-        return {
-            "title_options": [f"{keyword_surface} 完全ガイド", f"{keyword_surface} 比較ポイントまとめ"],
+        preferred_title = (final_title or "").strip()
+        default_titles = [f"{keyword_surface} 完全ガイド", f"{keyword_surface} 比較ポイントまとめ"]
+        title_options = default_titles.copy()
+        if preferred_title:
+            title_options = [preferred_title, *[title for title in default_titles if title != preferred_title]]
+        description_focus = preferred_title or f"{keyword_surface} の最新情報"
+        meta_payload = {
+            "title_options": title_options,
             "description_options": [
-                f"{keyword_surface} の最新情報と比較ポイントを詳しく解説",
+                f"{description_focus}をわかりやすく解説",
                 f"{keyword_surface} の選び方と成功事例",
             ],
             "og": {
-                "title": f"{keyword_surface} のベストプラクティス",
+                "title": preferred_title or f"{keyword_surface} のベストプラクティス",
                 "description": f"{keyword_surface} に関するノウハウを網羅",
             },
             "cta": cta,
             "preferred_output": context.output_format,
         }
+        if preferred_title:
+            meta_payload["final_title"] = preferred_title
+        return meta_payload
 
     def propose_links(self, prompt: Dict, context: PipelineContext) -> List[Dict]:
         """Propose internal links using BigQuery Vector Search."""
@@ -1277,8 +1374,23 @@ class DraftGenerationPipeline:
         step_start = time.time()
         draft = self.generate_draft(context, outline, citations)
         logger.info("Job %s: draft generation took %.2f seconds", job_id, time.time() - step_start)
+
         step_start = time.time()
-        meta = self.generate_meta(payload, context)
+        try:
+            title_result = self.finalize_title(context, outline, draft)
+        except Exception as exc:
+            logger.exception("Job %s: finalize_title crashed (%s)", job_id, exc)
+            fallback_title = outline.get("provisional_title") or outline.get("title") or context.primary_keyword
+            title_result = {
+                "final_title": fallback_title,
+                "provisional_title": fallback_title,
+                "title_variants": [],
+                "title_rationale": "finalize_title fallback due to exception",
+            }
+        logger.info("Job %s: finalize_title took %.2f seconds", job_id, time.time() - step_start)
+
+        step_start = time.time()
+        meta = self.generate_meta(payload, context, final_title=title_result.get("final_title"))
         logger.info("Job %s: meta generation took %.2f seconds", job_id, time.time() - step_start)
 
         step_start = time.time()
@@ -1290,6 +1402,14 @@ class DraftGenerationPipeline:
         logger.info("Job %s: quality evaluation took %.2f seconds", job_id, time.time() - step_start)
 
         bundle = self.bundle_outputs(context, outline, draft, meta, links, quality)
+        metadata = bundle.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+            bundle["metadata"] = metadata
+        for key in ("provisional_title", "final_title"):
+            value = title_result.get(key)
+            if value:
+                metadata[key] = str(value)
         total_time = time.time() - start_time
         logger.info("Completed pipeline for job %s in %.2f seconds (%.2f minutes)", job_id, total_time, total_time / 60)
         return bundle

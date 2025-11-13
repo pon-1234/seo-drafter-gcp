@@ -57,6 +57,13 @@ function PreviewPageContent() {
   const [rewriteDetections, setRewriteDetections] = useState<{ ng: string[]; abstract: string[] }>({ ng: [], abstract: [] });
   const [rewriteLoading, setRewriteLoading] = useState(false);
   const [rewriteError, setRewriteError] = useState<string | null>(null);
+  const resolvedTitle =
+    bundle?.metadata?.['final_title'] ||
+    bundle?.metadata?.['provisional_title'] ||
+    undefined;
+  const provisionalTitleValue = bundle?.metadata?.['provisional_title'];
+  const showProvisionalTitle =
+    Boolean(provisionalTitleValue && resolvedTitle && provisionalTitleValue !== resolvedTitle);
 
   // Load draft from URL query parameter on mount
   useEffect(() => {
@@ -297,6 +304,15 @@ function PreviewPageContent() {
                 <div className="space-y-2">
                   <h4 className="text-sm font-semibold text-slate-800 border-b border-slate-200 pb-1">基本情報</h4>
                   <div className="grid gap-2 text-sm">
+                    <div className="flex items-start gap-3">
+                      <span className="w-24 flex-shrink-0 text-slate-600">タイトル:</span>
+                      <div className="flex flex-col gap-0.5">
+                        <span className="font-semibold text-slate-900">{resolvedTitle ?? 'Untitled'}</span>
+                        {showProvisionalTitle && provisionalTitleValue ? (
+                          <span className="text-xs text-slate-500">仮タイトル: {provisionalTitleValue}</span>
+                        ) : null}
+                      </div>
+                    </div>
                     {bundle.metadata.job_id && (
                       <div className="flex items-start gap-3">
                         <span className="w-24 flex-shrink-0 text-slate-600">Job ID:</span>
