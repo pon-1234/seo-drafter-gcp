@@ -52,14 +52,24 @@ deploy_cloud_run() {
 
   echo "Deploying $service to Cloud Run..."
 
+  # Set appropriate resources based on service type
+  local memory="1Gi"
+  local cpu="1"
+
+  # Worker service needs more resources for parallel LLM calls
+  if [[ "$service" == "seo-drafter-worker" ]]; then
+    memory="2Gi"
+    cpu="2"
+  fi
+
   gcloud run deploy $service \
     --image=$image \
     --region=$REGION \
     --platform=managed \
     --service-account=$service_account \
     --set-env-vars="$env_vars" \
-    --memory=1Gi \
-    --cpu=1 \
+    --memory=$memory \
+    --cpu=$cpu \
     --timeout=$timeout \
     --max-instances=10 \
     $allow_unauthenticated
@@ -214,6 +224,8 @@ if [[ "$SERVICES" == *"worker"* ]]; then
   if [[ -n "$OPENAI_MODEL" ]]; then
     WORKER_ENV+=",OPENAI_MODEL=${OPENAI_MODEL}"
   fi
+  # Set parallel execution workers (default: 6 for better performance with 2 CPUs)
+  WORKER_ENV+=",LLM_MAX_WORKERS=${LLM_MAX_WORKERS:-6}"
 
   deploy_cloud_run \
     "seo-drafter-worker" \
@@ -221,7 +233,7 @@ if [[ "$SERVICES" == *"worker"* ]]; then
     "seo-drafter-worker@${PROJECT_ID}.iam.gserviceaccount.com" \
     "$WORKER_ENV" \
     "--no-allow-unauthenticated" \
-    900
+    1800
 
   # Get worker URL
   WORKER_URL=$(gcloud run services describe seo-drafter-worker --region=$REGION --format='value(status.url)')

@@ -1110,8 +1110,11 @@ class DraftGenerationPipeline:
         }
 
     def run(self, payload: Dict) -> Dict:
-        logger.info("Starting pipeline for job %s", payload["job_id"])
-        draft_id = payload.get("draft_id") or str(payload["job_id"]).replace("-", "")[:12]
+        import time
+        start_time = time.time()
+        job_id = payload["job_id"]
+        logger.info("Starting pipeline for job %s", job_id)
+        draft_id = payload.get("draft_id") or str(job_id).replace("-", "")[:12]
         llm_override_raw = payload.get("llm")
         if isinstance(llm_override_raw, dict):
             llm_override = dict(llm_override_raw)
@@ -1209,7 +1212,9 @@ class DraftGenerationPipeline:
             expertise_level=expertise_level,
             tone=tone,
         )
+        step_start = time.time()
         outline = self.generate_outline(context, payload)
+        logger.info("Job %s: outline generation took %.2f seconds", job_id, time.time() - step_start)
         citations: List[Dict[str, Any]] = []
         raw_citations = payload.get("citations") or []
         for item in raw_citations:
@@ -1221,12 +1226,24 @@ class DraftGenerationPipeline:
             citations = [{"url": url} for url in context.reference_urls]
         if not citations:
             citations = [{"url": "https://www.google.com/search?q=" + payload["primary_keyword"]}]
+        step_start = time.time()
         draft = self.generate_draft(context, outline, citations)
+        logger.info("Job %s: draft generation took %.2f seconds", job_id, time.time() - step_start)
+        step_start = time.time()
         meta = self.generate_meta(payload, context)
+        logger.info("Job %s: meta generation took %.2f seconds", job_id, time.time() - step_start)
+
+        step_start = time.time()
         links = self.propose_links(payload, context)
+        logger.info("Job %s: link proposal took %.2f seconds", job_id, time.time() - step_start)
+
+        step_start = time.time()
         quality = self.evaluate_quality(draft, context)
+        logger.info("Job %s: quality evaluation took %.2f seconds", job_id, time.time() - step_start)
+
         bundle = self.bundle_outputs(context, outline, draft, meta, links, quality)
-        logger.info("Completed pipeline for job %s", payload["job_id"])
+        total_time = time.time() - start_time
+        logger.info("Completed pipeline for job %s in %.2f seconds (%.2f minutes)", job_id, total_time, total_time / 60)
         return bundle
 
 
