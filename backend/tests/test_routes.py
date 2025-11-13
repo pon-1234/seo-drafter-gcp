@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.api.routes import _render_markdown
 
 client = TestClient(app)
 
@@ -23,3 +24,63 @@ def test_quality_kpis_empty():
     assert response.status_code == 200
     data = response.json()
     assert data["sample_size"] == 0
+
+
+def test_render_markdown_uses_outline_title_and_merges_faq():
+    draft = {
+        "sections": [
+            {
+                "h2": "30秒で要点",
+                "paragraphs": [
+                    {"heading": "まとめ", "text": "本文です。"}
+                ],
+            },
+            {
+                "h2": "よくある質問（FAQ）",
+                "paragraphs": [],
+            },
+        ],
+        "faq": [
+            {"question": "費用は？", "answer": "状況により異なります。"}
+        ],
+    }
+    outline = {"title": "デジタルマーケティングとは？"}
+    markdown = _render_markdown(draft, outline)
+
+    assert markdown.splitlines()[0] == "# デジタルマーケティングとは？"
+    # FAQ見出しは1回のみ
+    assert markdown.count("## よくある質問（FAQ）") <= 1
+    assert markdown.count("よくある質問（FAQ）") >= 1
+
+
+def test_render_markdown_aggregates_references():
+    draft = {
+        "sections": [
+            {
+                "h2": "セクション",
+                "paragraphs": [
+                    {
+                        "heading": "詳細",
+                        "text": "数値を整理します。",
+                        "citations": [
+                            "https://example.com/data/2024",
+                            "https://example.com/data/2024",  # duplicate should be deduped
+                        ],
+                    }
+                ],
+            }
+        ],
+        "faq": [
+            {
+                "question": "効果は？",
+                "answer": "3カ月で改善が見えます。",
+                "citations": ["https://support.google.com/analytics/answer"],
+            }
+        ],
+    }
+    markdown = _render_markdown(draft, {"title": "テストタイトル"})
+
+    assert "## 参考情報" in markdown
+    assert "[example.com/data/2024]" in markdown
+    assert "[support.google.com/analytics/answer]" in markdown
+    assert "根拠:" not in markdown

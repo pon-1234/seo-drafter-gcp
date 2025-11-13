@@ -4,6 +4,7 @@ import logging
 import uuid
 from datetime import datetime
 from typing import List, Optional
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import ValidationError
@@ -533,7 +534,7 @@ def persist_draft(
     quality_snapshot = outputs.get("quality", {})
 
     outline_path = store.save_artifact(draft_id, "outline.json", outline)
-    draft_md = _render_markdown(draft)
+    draft_md = _render_markdown(draft, outline)
     draft_path = store.save_raw(draft_id, "draft.md", draft_md)
     meta_path = store.save_artifact(draft_id, "meta.json", meta)
     links_path = store.save_artifact(draft_id, "links.json", {"suggestions": links})
@@ -602,7 +603,35 @@ def mark_job_failed(
     return job
 
 
-def _render_markdown(draft: dict) -> str:
+def _looks_like_faq_heading(heading: str) -> bool:
+    normalized = (heading or "").strip().lower()
+    if not normalized:
+        return False
+    return "faq" in normalized or "よくある質問" in heading
+
+
+def _normalize_citation(value: str) -> Optional[str]:
+    if isinstance(value, str):
+        trimmed = value.strip()
+        if trimmed:
+            return trimmed
+    return None
+
+
+def _format_reference(url: str) -> str:
+    parsed = urlparse(url)
+    host = parsed.netloc
+    path = parsed.path or ""
+    if path == "/":
+        path = ""
+    display = host + path if host else url
+    # Limit overly long labels for readability
+    if len(display) > 60:
+        display = display[:57] + "..."
+    return f"[{display}]({url})" if url.startswith(("http://", "https://")) else display
+
+
+def _render_markdown(draft: dict, outline: Optional[dict] = None) -> str:
     payload: dict = {}
     if isinstance(draft, dict):
         if "sections" in draft or "faq" in draft:
@@ -611,24 +640,63 @@ def _render_markdown(draft: dict) -> str:
             payload = draft.get("draft", {})
     sections = payload.get("sections", []) if isinstance(payload, dict) else []
     faq_items = payload.get("faq", []) if isinstance(payload, dict) else []
-    lines = ["# 生成ドラフト"]
+    title = ""
+    if isinstance(outline, dict):
+        title = str(outline.get("title") or "").strip()
+    if not title:
+        title = str(payload.get("title") or "").strip()
+    if not title:
+        title = "生成ドラフト"
+    lines = [f"# {title}"]
+    reference_urls: List[str] = []
+    reference_seen = set()
+
+    def record_citations(citations: Optional[List[str]]) -> None:
+        if not citations:
+            return
+        for citation in citations:
+            normalized = _normalize_citation(citation)
+            if normalized and normalized not in reference_seen:
+                reference_seen.add(normalized)
+                reference_urls.append(normalized)
+
+    faq_embedded = False
     for section in sections:
-        lines.append(f"## {section.get('h2', '')}")
+        h2_title = str(section.get("h2") or "").strip()
+        if not h2_title:
+            continue
+        lines.append(f"## {h2_title}")
         for paragraph in section.get("paragraphs", []):
-            heading = paragraph.get("heading")
-            if heading:
-                lines.append(f"### {heading}")
-            lines.append(paragraph.get("text", ""))
-            citations = paragraph.get("citations", [])
-            if citations:
-                lines.append("根拠: " + ", ".join(citations))
+            paragraph_heading = paragraph.get("heading")
+            if paragraph_heading:
+                lines.append(f"### {paragraph_heading}")
+            text = paragraph.get("text", "")
+            if text:
+                lines.append(text)
+            record_citations(paragraph.get("citations"))
             lines.append("")
-    if faq_items:
-        lines.append("## FAQ")
+        if faq_items and not faq_embedded and _looks_like_faq_heading(h2_title):
+            for item in faq_items:
+                question = item.get("question", "")
+                answer = item.get("answer", "")
+                if question:
+                    lines.append(f"### {question}")
+                if answer:
+                    lines.append(answer)
+                record_citations(item.get("citations"))
+                lines.append("")
+            faq_embedded = True
+    if faq_items and not faq_embedded:
+        lines.append("## よくある質問（FAQ）")
         for item in faq_items:
             lines.append(f"### {item.get('question', '')}")
             lines.append(item.get("answer", ""))
+            record_citations(item.get("citations"))
             lines.append("")
+    if reference_urls:
+        lines.append("## 参考情報")
+        for url in reference_urls:
+            lines.append(f"- {_format_reference(url)}")
     return "\n".join(lines)
 
 

@@ -58,6 +58,8 @@ class TestDraftGenerationPipeline:
             llm_temperature=0.7,
             serp_snapshot=[],
             serp_gap_topics=[],
+            expertise_level="intermediate",
+            tone="formal",
         )
         payload = {"primary_keyword": "SEO対策"}
 
@@ -99,6 +101,8 @@ class TestDraftGenerationPipeline:
             llm_temperature=0.7,
             serp_snapshot=[],
             serp_gap_topics=[],
+            expertise_level="intermediate",
+            tone="formal",
         )
 
         meta = pipeline.generate_meta(payload, context)
@@ -150,6 +154,8 @@ class TestDraftGenerationPipeline:
             llm_temperature=0.7,
             serp_snapshot=[],
             serp_gap_topics=[],
+            expertise_level="intermediate",
+            tone="formal",
         )
 
         quality = pipeline.evaluate_quality(draft, context)

@@ -233,9 +233,20 @@ class DraftGenerationPipeline:
             return self._outline_from_manual(context, prompt)
         return self._outline_from_template(context, prompt)
 
-    @staticmethod
-    def _build_quest_title(primary_keyword: str) -> str:
-        return f"{primary_keyword}の実務ガイド: 結論と成功プロセス"
+    def _build_quest_title(self, primary_keyword: str, context: Optional[PipelineContext] = None) -> str:
+        keyword = primary_keyword or "SEO"
+        article_type = context.article_type if context else "information"
+        expertise = context.expertise_level if context else "intermediate"
+
+        if expertise == "beginner":
+            if article_type == "comparison":
+                return f"{keyword}の選び方ガイド：初心者向けおすすめと優先順位"
+            return f"{keyword}とは？初心者向けに基礎から実践まで解説"
+
+        if article_type == "comparison":
+            return f"{keyword}の比較ガイド: 選び方と優先順位"
+
+        return f"{keyword}の実務ガイド: 結論と成功プロセス"
 
     def _outline_from_manual(self, context: PipelineContext, prompt: Dict) -> Dict:
         sections = []
@@ -250,7 +261,7 @@ class DraftGenerationPipeline:
                 }
             )
         return {
-            "title": self._build_quest_title(prompt["primary_keyword"]),
+            "title": self._build_quest_title(prompt["primary_keyword"], context),
             "h2": sections,
         }
 
@@ -275,7 +286,7 @@ class DraftGenerationPipeline:
                 }
             )
         return {
-            "title": self._build_quest_title(keyword),
+            "title": self._build_quest_title(keyword, context),
             "h2": template_sections,
         }
 
@@ -283,72 +294,63 @@ class DraftGenerationPipeline:
         # Beginner-friendly templates (optimized for "◯◯とは" search intent)
         beginner_information_template = [
             {
-                "text": "30秒で要点",
+                "text": "30秒でわかる結論（まずやるべき3つ）",
                 "purpose": "Summary",
                 "h3": [
-                    {"text": f"{keyword}の定義（60〜90字）", "purpose": "Definition"},
-                    {"text": "この記事で分かること", "purpose": "Overview"},
+                    {"text": "結論のサマリ", "purpose": "Summary"},
+                    {"text": "おすすめ施策TOP3（表）", "purpose": "SummaryTable"},
                 ],
             },
             {
-                "text": f"{keyword}の意味をわかりやすく解説",
+                "text": f"{keyword}とは？基礎と全体像",
                 "purpose": "Definition",
                 "h3": [
-                    {"text": "一言で言うと何？", "purpose": "SimpleDefinition"},
-                    {"text": "従来の方法との違い", "purpose": "Difference"},
+                    {"text": f"{keyword}の定義と役割をやさしく解説", "purpose": "Definition"},
+                    {"text": "関連するWebマーケティングとの違い", "purpose": "Difference"},
+                    {"text": "いま注目される背景データ", "purpose": "Importance"},
                 ],
             },
             {
-                "text": f"{keyword}の主な手法と役割",
+                "text": "施策選定で失敗しない3つのポイント",
+                "purpose": "Selection",
+                "h3": [
+                    {"text": "ポイント1：目標と予算を数値で決める", "purpose": "GoalBudget"},
+                    {"text": "ポイント2：社内リソースと運用体制を把握", "purpose": "Resources"},
+                    {"text": "ポイント3：KPIと効果測定の方法を整える", "purpose": "Measurement"},
+                ],
+            },
+            {
+                "text": f"{keyword}の主要手法5つを比較",
                 "purpose": "Methods",
                 "h3": [
-                    {"text": "代表的な手法5つ（表で比較）", "purpose": "MethodsTable"},
-                    {"text": "それぞれどう使い分ける？", "purpose": "UseCases"},
+                    {"text": "主要施策の比較表（目的・費用・スピード）", "purpose": "MethodsTable"},
+                    {"text": "初心者におすすめの組み合わせ方", "purpose": "UseCases"},
                 ],
             },
             {
-                "text": f"{keyword}のメリット・デメリット",
-                "purpose": "ProsCons",
+                "text": "主要ツールと導入の考え方",
+                "purpose": "Tools",
                 "h3": [
-                    {"text": "3つのメリット", "purpose": "Pros"},
-                    {"text": "2つのデメリットと対処法", "purpose": "Cons"},
+                    {"text": "Googleアナリティクス4で現状把握", "purpose": "GA4"},
+                    {"text": "Google広告で集客を加速する", "purpose": "Ads"},
+                    {"text": "SNS・MAツールなど他チャネルの活用", "purpose": "OtherTools"},
                 ],
             },
             {
-                "text": f"{keyword}を始める5ステップ",
-                "purpose": "HowTo",
+                "text": "企業規模・担当者タイプ別の施策優先度",
+                "purpose": "Segmentation",
                 "h3": [
-                    {"text": "ステップ1：目標を決める", "purpose": "Step1"},
-                    {"text": "ステップ2：計測の準備をする", "purpose": "Step2"},
-                    {"text": "ステップ3：施策を実行する", "purpose": "Step3"},
-                    {"text": "ステップ4：データを確認する", "purpose": "Step4"},
-                    {"text": "ステップ5：改善を回す", "purpose": "Step5"},
+                    {"text": "小規模事業者がまず整えること", "purpose": "SmallBusiness"},
+                    {"text": "中規模企業の体制づくり", "purpose": "MidMarket"},
+                    {"text": "大企業での全社展開ポイント", "purpose": "Enterprise"},
                 ],
             },
             {
-                "text": "よくある失敗と対処法",
-                "purpose": "CommonMistakes",
-                "h3": [
-                    {"text": "失敗例1：目標設定のミス", "purpose": "Mistake1"},
-                    {"text": "失敗例2：計測の設定漏れ", "purpose": "Mistake2"},
-                    {"text": "失敗例3：改善が続かない", "purpose": "Mistake3"},
-                ],
-            },
-            {
-                "text": "よくある質問（FAQ）",
-                "purpose": "FAQ",
-                "h3": [
-                    {"text": "費用はどれくらいかかる？", "purpose": "Cost"},
-                    {"text": "始める前に何が必要？", "purpose": "Prep"},
-                    {"text": "効果が出るまでの期間は？", "purpose": "Timeline"},
-                ],
-            },
-            {
-                "text": f"まとめ：{keyword}の次のステップ",
+                "text": f"まとめ：{keyword}の次のステップとチェックリスト",
                 "purpose": "Close",
                 "h3": [
-                    {"text": "この記事の要点", "purpose": "Recap"},
-                    {"text": "今日からできること", "purpose": "Action"},
+                    {"text": "失敗しないためのチェックリスト", "purpose": "Checklist"},
+                    {"text": "今日からできるアクション", "purpose": "Action"},
                 ],
             },
         ]
@@ -384,14 +386,6 @@ class DraftGenerationPipeline:
                 "h3": [
                     {"text": "初めて使う人向け", "purpose": "Beginner"},
                     {"text": "予算を抑えたい人向け", "purpose": "Budget"},
-                ],
-            },
-            {
-                "text": "よくある質問に答える",
-                "purpose": "FAQ",
-                "h3": [
-                    {"text": "料金・費用について", "purpose": "Cost"},
-                    {"text": "使い方・設定について", "purpose": "Usage"},
                 ],
             },
             {
@@ -638,14 +632,6 @@ class DraftGenerationPipeline:
                 "h3": [
                     {"text": "投資対効果を示す数値・試算", "purpose": "Finance"},
                     {"text": "リスクとコンプライアンス対応", "purpose": "Finance"},
-                ],
-            },
-            {
-                "text": "よくある質問と懸念の解消",
-                "purpose": "FAQ",
-                "h3": [
-                    {"text": "コスト・体制・データ連携の疑問", "purpose": "FAQ"},
-                    {"text": "ステークホルダー調整のポイント", "purpose": "FAQ"},
                 ],
             },
             {
