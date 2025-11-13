@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, List, Optional
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -610,12 +611,29 @@ def _looks_like_faq_heading(heading: str) -> bool:
     return "faq" in normalized or "よくある質問" in heading
 
 
-def _normalize_citation(value: str) -> Optional[str]:
-    if isinstance(value, str):
-        trimmed = value.strip()
-        if trimmed:
-            return trimmed
-    return None
+_CITATION_URL_PATTERN = re.compile(r"https?://[^\s、，,)\uFF09]+")
+
+
+def _normalize_citation(value: Any) -> List[str]:
+    urls: List[str] = []
+    if value is None:
+        return urls
+    if isinstance(value, (list, tuple, set)):
+        for item in value:
+            urls.extend(_normalize_citation(item))
+        return urls
+    if isinstance(value, dict):
+        candidate = value.get("url") or value.get("uri")
+        return _normalize_citation(candidate) if candidate else urls
+    text = str(value).strip()
+    if not text:
+        return urls
+    matches = _CITATION_URL_PATTERN.findall(text)
+    if matches:
+        return matches
+    if text.startswith(("http://", "https://")):
+        return [text]
+    return [text]
 
 
 def _format_reference(url: str) -> str:
@@ -629,6 +647,34 @@ def _format_reference(url: str) -> str:
     if len(display) > 60:
         display = display[:57] + "..."
     return f"[{display}]({url})" if url.startswith(("http://", "https://")) else display
+
+
+def _strip_embedded_heading(text: Any, heading: Optional[str]) -> str:
+    if not isinstance(text, str):
+        return text
+    if not heading:
+        return text
+    normalized_heading = heading.strip()
+    if not normalized_heading:
+        return text
+    stripped = text.lstrip()
+    if not stripped.startswith("#"):
+        return text
+    lines = stripped.splitlines()
+    if not lines:
+        return text
+    first_line = lines[0].strip()
+    if not first_line.startswith("#"):
+        return text
+    first_line_content = first_line.lstrip("#").strip()
+    if not first_line_content.startswith(normalized_heading):
+        return text
+    remainder = first_line_content[len(normalized_heading):].lstrip("：: -—　")
+    if remainder:
+        lines[0] = remainder
+    else:
+        lines = lines[1:]
+    return "\n".join(lines).lstrip()
 
 
 def _render_markdown(draft: dict, outline: Optional[dict] = None) -> str:
@@ -648,6 +694,14 @@ def _render_markdown(draft: dict, outline: Optional[dict] = None) -> str:
     if not title:
         title = "生成ドラフト"
     lines = [f"# {title}"]
+    reader_note = ""
+    if isinstance(outline, dict):
+        reader_note = str(outline.get("reader_note") or "").strip()
+    if not reader_note and isinstance(payload, dict):
+        reader_note = str(payload.get("reader_note") or "").strip()
+    if reader_note:
+        lines.append(reader_note)
+        lines.append("")
     reference_urls: List[str] = []
     reference_seen = set()
 
@@ -655,10 +709,10 @@ def _render_markdown(draft: dict, outline: Optional[dict] = None) -> str:
         if not citations:
             return
         for citation in citations:
-            normalized = _normalize_citation(citation)
-            if normalized and normalized not in reference_seen:
-                reference_seen.add(normalized)
-                reference_urls.append(normalized)
+            for normalized in _normalize_citation(citation):
+                if normalized and normalized not in reference_seen:
+                    reference_seen.add(normalized)
+                    reference_urls.append(normalized)
 
     faq_embedded = False
     for section in sections:
@@ -670,9 +724,10 @@ def _render_markdown(draft: dict, outline: Optional[dict] = None) -> str:
             paragraph_heading = paragraph.get("heading")
             if paragraph_heading:
                 lines.append(f"### {paragraph_heading}")
-            text = paragraph.get("text", "")
-            if text:
-                lines.append(text)
+            raw_text = paragraph.get("text", "")
+            cleaned_text = _strip_embedded_heading(raw_text, paragraph_heading)
+            if cleaned_text:
+                lines.append(cleaned_text)
             record_citations(paragraph.get("citations"))
             lines.append("")
         if faq_items and not faq_embedded and _looks_like_faq_heading(h2_title):

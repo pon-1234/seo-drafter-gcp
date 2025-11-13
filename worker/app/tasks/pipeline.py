@@ -230,23 +230,68 @@ class DraftGenerationPipeline:
             context.heading_mode,
         )
         if context.heading_mode == "manual" and context.heading_overrides:
-            return self._outline_from_manual(context, prompt)
-        return self._outline_from_template(context, prompt)
+            outline = self._outline_from_manual(context, prompt)
+        else:
+            outline = self._outline_from_template(context, prompt)
+        reader_note = self._build_reader_note(context)
+        if reader_note:
+            outline["reader_note"] = reader_note
+        return outline
 
     def _build_quest_title(self, primary_keyword: str, context: Optional[PipelineContext] = None) -> str:
         keyword = primary_keyword or "SEO"
+        keyword_surface = self._sanitize_keyword_surface(keyword)
         article_type = context.article_type if context else "information"
         expertise = context.expertise_level if context else "intermediate"
 
         if expertise == "beginner":
             if article_type == "comparison":
-                return f"{keyword}の選び方ガイド：初心者向けおすすめと優先順位"
-            return f"{keyword}とは？初心者向けに基礎から実践まで解説"
+                return f"{keyword_surface}の選び方ガイド：初心者向けおすすめと優先順位"
+            return f"{keyword_surface}とは？初心者向けに基礎から実践まで解説"
 
         if article_type == "comparison":
-            return f"{keyword}の比較ガイド: 選び方と優先順位"
+            return f"{keyword_surface}の比較ガイド: 選び方と優先順位"
 
-        return f"{keyword}の実務ガイド: 結論と成功プロセス"
+        return f"{keyword_surface}の実務ガイド: 結論と成功プロセス"
+
+    @staticmethod
+    def _sanitize_keyword_surface(keyword: str) -> str:
+        raw_value = str(keyword or "").replace("\u3000", " ").strip()
+        if not raw_value:
+            return "SEO"
+        cleaned = re.sub(r"(?:\s|　)*(?:とは)+(?:[?？]*)$", "", raw_value).strip()
+        if not cleaned:
+            fallback = re.sub(r"(?:とは|[?？])+", "", raw_value).strip()
+            return fallback or "SEO"
+        return cleaned
+
+    def _build_reader_note(self, context: PipelineContext) -> str:
+        persona = context.persona or {}
+        fallback_targets = {
+            "beginner": "中小企業のBtoB担当者",
+            "intermediate": "社内のマーケティングリーダー",
+            "expert": "事業・プロダクト責任者",
+        }
+        fallback_levels = {
+            "beginner": "用語はなんとなく知っていて基礎を整理したい層",
+            "intermediate": "施策を体系立てて比較検討したい層",
+            "expert": "戦略と実行を同時に見直したい層",
+        }
+        target = persona.get("name") or persona.get("job_to_be_done") or fallback_targets.get(
+            context.expertise_level, "マーケティング担当者"
+        )
+        level_hint = persona.get("reading_level") or fallback_levels.get(
+            context.expertise_level, "実務で成果を出したい層"
+        )
+        goals = [str(goal).strip() for goal in persona.get("goals", []) if str(goal).strip()]
+        job_to_be_done = str(persona.get("job_to_be_done") or "").strip()
+        if goals:
+            action_clause = f"が{goals[0]}ための"
+        elif job_to_be_done:
+            action_clause = f"が{job_to_be_done}ための"
+        else:
+            action_clause = "向けの"
+        return f"本記事は、{target}（{level_hint}）{action_clause}ガイドです。"
 
     def _outline_from_manual(self, context: PipelineContext, prompt: Dict) -> Dict:
         sections = []
@@ -292,6 +337,7 @@ class DraftGenerationPipeline:
 
     def _article_type_template(self, article_type: str, keyword: str, expertise_level: str = "intermediate") -> List[Dict[str, Any]]:
         # Beginner-friendly templates (optimized for "◯◯とは" search intent)
+        keyword_surface = self._sanitize_keyword_surface(keyword)
         beginner_information_template = [
             {
                 "text": "30秒でわかる結論（まずやるべき3つ）",
@@ -302,10 +348,10 @@ class DraftGenerationPipeline:
                 ],
             },
             {
-                "text": f"{keyword}とは？基礎と全体像",
+                "text": f"{keyword_surface}とは？基礎と全体像",
                 "purpose": "Definition",
                 "h3": [
-                    {"text": f"{keyword}の定義と役割をやさしく解説", "purpose": "Definition"},
+                    {"text": f"{keyword_surface}の定義と役割をやさしく解説", "purpose": "Definition"},
                     {"text": "関連するWebマーケティングとの違い", "purpose": "Difference"},
                     {"text": "いま注目される背景データ", "purpose": "Importance"},
                 ],
@@ -320,7 +366,7 @@ class DraftGenerationPipeline:
                 ],
             },
             {
-                "text": f"{keyword}の主要手法5つを比較",
+                "text": f"{keyword_surface}の主要手法5つを比較",
                 "purpose": "Methods",
                 "h3": [
                     {"text": "主要施策の比較表（目的・費用・スピード）", "purpose": "MethodsTable"},
@@ -346,7 +392,7 @@ class DraftGenerationPipeline:
                 ],
             },
             {
-                "text": f"まとめ：{keyword}の次のステップとチェックリスト",
+                "text": f"まとめ：{keyword_surface}の次のステップとチェックリスト",
                 "purpose": "Close",
                 "h3": [
                     {"text": "失敗しないためのチェックリスト", "purpose": "Checklist"},
@@ -365,7 +411,7 @@ class DraftGenerationPipeline:
                 ],
             },
             {
-                "text": f"{keyword}を選ぶポイントを3軸で解説",
+                "text": f"{keyword_surface}を選ぶポイントを3軸で解説",
                 "purpose": "Introduction",
                 "h3": [
                     {"text": "何を基準に選べばいい？", "purpose": "Criteria"},
@@ -389,7 +435,7 @@ class DraftGenerationPipeline:
                 ],
             },
             {
-                "text": f"まとめ：{keyword}を始めてみよう",
+                "text": f"まとめ：{keyword_surface}を始めてみよう",
                 "purpose": "Close",
                 "h3": [
                     {"text": "次にやってみること", "purpose": "NextAction"},
@@ -442,7 +488,7 @@ class DraftGenerationPipeline:
         # Intermediate/Expert templates (existing)
         information_template = [
             {
-                "text": f"結論: {keyword}で実現できる成果と次のアクション",
+                "text": f"結論: {keyword_surface}で実現できる成果と次のアクション",
                 "purpose": "Summary",
                 "h3": [
                     {"text": "最優先で押さえるべき成功条件", "purpose": "Summary"},
@@ -942,16 +988,17 @@ class DraftGenerationPipeline:
 
     def generate_meta(self, prompt: Dict, context: PipelineContext) -> Dict:
         keyword = prompt["primary_keyword"]
+        keyword_surface = self._sanitize_keyword_surface(keyword)
         cta = context.cta or "資料請求はこちら"
         return {
-            "title_options": [f"{keyword} 完全ガイド", f"{keyword} 比較ポイントまとめ"],
+            "title_options": [f"{keyword_surface} 完全ガイド", f"{keyword_surface} 比較ポイントまとめ"],
             "description_options": [
-                f"{keyword} の最新情報と比較ポイントを詳しく解説",
-                f"{keyword} の選び方と成功事例",
+                f"{keyword_surface} の最新情報と比較ポイントを詳しく解説",
+                f"{keyword_surface} の選び方と成功事例",
             ],
             "og": {
-                "title": f"{keyword} のベストプラクティス",
-                "description": f"{keyword} に関するノウハウを網羅",
+                "title": f"{keyword_surface} のベストプラクティス",
+                "description": f"{keyword_surface} に関するノウハウを網羅",
             },
             "cta": cta,
             "preferred_output": context.output_format,
@@ -960,6 +1007,7 @@ class DraftGenerationPipeline:
     def propose_links(self, prompt: Dict, context: PipelineContext) -> List[Dict]:
         """Propose internal links using BigQuery Vector Search."""
         keyword = prompt["primary_keyword"]
+        keyword_surface = self._sanitize_keyword_surface(keyword)
         persona_goals = context.persona.get("goals", [])
 
         if not self.link_repository or not self.link_repository.is_enabled:
@@ -973,7 +1021,7 @@ class DraftGenerationPipeline:
                 results.append({
                     "url": candidate["url"],
                     "title": candidate["title"],
-                    "anchor": f"{keyword} と関連する {candidate['title']}",
+                    "anchor": f"{keyword_surface} と関連する {candidate['title']}",
                     "score": candidate.get("score", 0.0),
                     "snippet": candidate.get("snippet", ""),
                 })

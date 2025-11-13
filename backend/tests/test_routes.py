@@ -84,3 +84,45 @@ def test_render_markdown_aggregates_references():
     assert "[example.com/data/2024]" in markdown
     assert "[support.google.com/analytics/answer]" in markdown
     assert "根拠:" not in markdown
+
+
+def test_render_markdown_strips_duplicate_h3():
+    draft = {
+        "sections": [
+            {
+                "h2": "セクション",
+                "paragraphs": [
+                    {
+                        "heading": "重複見出し",
+                        "text": "### 重複見出し 詳細をまとめます。",
+                    }
+                ],
+            }
+        ]
+    }
+    markdown = _render_markdown(draft, {"title": "テスト"})
+
+    assert markdown.count("### 重複見出し") == 1
+    assert "詳細をまとめます。" in markdown
+
+
+def test_render_markdown_splits_multi_url_citation():
+    draft = {
+        "sections": [
+            {
+                "h2": "セクション",
+                "paragraphs": [
+                    {
+                        "heading": "参考リンク",
+                        "text": "資料を掲載します。",
+                        "citations": ["https://example.com/a, https://example.com/b https://example.org/c)"],
+                    }
+                ],
+            }
+        ]
+    }
+    markdown = _render_markdown(draft, {"title": "テスト"})
+    assert markdown.count("## 参考情報") == 1
+    assert "[example.com/a]" in markdown
+    assert "[example.com/b]" in markdown
+    assert "[example.org/c]" in markdown

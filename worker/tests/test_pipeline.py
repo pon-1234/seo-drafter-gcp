@@ -69,6 +69,7 @@ class TestDraftGenerationPipeline:
         assert "h2" in outline
         assert len(outline["h2"]) > 0
         assert "SEO対策" in outline["title"]
+        assert outline.get("reader_note")
 
     def test_generate_meta(self):
         """Test meta tag generation."""
@@ -214,6 +215,7 @@ class TestDraftGenerationPipeline:
         # Verify outline structure
         assert "title" in result["outline"]
         assert "h2" in result["outline"]
+        assert result["outline"].get("reader_note")
 
         # Verify draft structure
         assert "sections" in result["draft"]
