@@ -282,6 +282,17 @@ class DraftGenerationPipeline:
                 return cleaned
         return raw_text.strip()
 
+    @staticmethod
+    def _strip_json_fence(raw_text: str) -> str:
+        if not raw_text:
+            return ""
+        text = raw_text.strip()
+        if text.startswith("```"):
+            text = re.sub(r"^```(?:json)?", "", text, flags=re.IGNORECASE).strip()
+            if text.endswith("```"):
+                text = text[: -3].strip()
+        return text
+
     def _build_reader_note(self, context: PipelineContext) -> str:
         persona = context.persona or {}
         fallback_targets = {
@@ -1007,6 +1018,177 @@ class DraftGenerationPipeline:
 
         return faq_items
 
+    def refine_draft(self, context: PipelineContext, outline: Dict, draft: Dict) -> Dict:
+        logger.info("Refining draft for job %s", context.job_id)
+        if not isinstance(draft, dict) or "sections" not in draft:
+            logger.info("Job %s: skipping refine_draft (missing sections)", context.job_id)
+            return draft
+
+        sections = draft.get("sections") or []
+        if not sections:
+            logger.info("Job %s: skipping refine_draft (empty sections)", context.job_id)
+            return draft
+
+        outline_headings = [
+            str(section.get("text") or "").strip()
+            for section in outline.get("h2", [])
+            if str(section.get("text") or "").strip()
+        ]
+
+        trimmed_sections: List[Dict[str, Any]] = []
+        for section in sections[:10]:
+            heading = str(section.get("h2") or section.get("heading") or "").strip()
+            trimmed_paragraphs: List[str] = []
+            for paragraph in section.get("paragraphs", [])[:3]:
+                text = str(paragraph.get("text") or "").strip()
+                if text:
+                    trimmed_paragraphs.append(text[:500])
+            trimmed_sections.append({"heading": heading, "paragraphs": trimmed_paragraphs})
+
+        prompt_payload = {
+            "primary_keyword": context.primary_keyword,
+            "intent": context.intent,
+            "tone": context.tone,
+            "outline_headings": outline_headings,
+            "sections": trimmed_sections,
+            "faq": draft.get("faq", []),
+            "claims": draft.get("claims", []),
+        }
+        prompt_json = json.dumps(prompt_payload, ensure_ascii=False)
+        instruction = (
+            "あなたはシニアSEO編集長です。以下のJSONで渡すドラフトを推敲し、"
+            "論理構成・重複・専門用語・結論との整合性を整えてください。\n\n"
+            "必ず下記のフォーマットでJSONのみを出力してください:\n"
+            "{\n"
+            '  "sections": [\n'
+            '    {"h2": "見出し", "paragraphs": [{"text": "本文", "citations": ["..."]}]}\n'
+            "  ],\n"
+            '  "faq": [{"question": "...", "answer": "..."}],\n'
+            '  "claims": [{"id": "...", "text": "...", "citations": ["..."]}],\n'
+            '  "refinement_notes": ["修正内容のメモ"]\n'
+            "}\n\n"
+            "- 見出し数は必要に応じて微調整しても良いが、情報は削りすぎない\n"
+            "- 数値・引用URLは可能な限り保持し、変更した場合は notes に理由を書く\n"
+            "- 各 paragraph は具体的で重複のない文章にする\n"
+            "- FAQ/claims は要点のみ残し、不要な重複は削除\n"
+            "- refinement_notes にはユーザーが後から理解できる粒度で修正理由を列挙\n\n"
+            "=== 元ドラフト(JSON) ===\n"
+            f"{prompt_json}\n"
+            "========================"
+        )
+
+        try:
+            result = self._generate_grounded_content(
+                instruction,
+                temperature=max(0.2, min(context.llm_temperature, 0.6)),
+                max_tokens=2800,
+            )
+            raw_text = str(result.get("text") or "").strip()
+            normalized_text = self._strip_json_fence(raw_text)
+            refined_payload = json.loads(normalized_text)
+        except Exception as exc:
+            logger.warning("Job %s: refine_draft failed (%s)", context.job_id, exc)
+            return draft
+
+        if not isinstance(refined_payload, dict):
+            logger.warning("Job %s: refine_draft response is not dict", context.job_id)
+            return draft
+
+        original_sections: List[Dict[str, Any]] = sections
+        updated_sections = refined_payload.get("sections")
+
+        def merge_sections() -> List[Dict[str, Any]]:
+            if not isinstance(updated_sections, list) or not updated_sections:
+                return original_sections
+            merged: List[Dict[str, Any]] = []
+            for idx, original in enumerate(original_sections):
+                updated = updated_sections[idx] if idx < len(updated_sections) else {}
+                new_h2 = str(updated.get("h2") or "").strip()
+                merged_section = {
+                    "h2": new_h2 or original.get("h2"),
+                    "paragraphs": [],
+                }
+                updated_paragraphs = updated.get("paragraphs") if isinstance(updated, dict) else None
+                if isinstance(updated_paragraphs, list) and updated_paragraphs:
+                    for p_idx, paragraph in enumerate(updated_paragraphs):
+                        base_paragraphs = original.get("paragraphs", [])
+                        base = base_paragraphs[p_idx] if p_idx < len(base_paragraphs) else {}
+                        text = str(paragraph.get("text") or "").strip() or base.get("text", "")
+                        citations = paragraph.get("citations")
+                        if not citations and isinstance(base, dict):
+                            citations = base.get("citations", [])
+                        merged_section["paragraphs"].append({
+                            "heading": paragraph.get("heading") or base.get("heading") or merged_section["h2"],
+                            "text": text,
+                            "citations": citations or [],
+                            "claim_id": paragraph.get("claim_id") or base.get("claim_id"),
+                        })
+                else:
+                    merged_section["paragraphs"] = original.get("paragraphs", [])
+                merged.append(merged_section)
+            if len(updated_sections) > len(original_sections):
+                for extra_section in updated_sections[len(original_sections):]:
+                    heading = str(extra_section.get("h2") or "").strip() or "追加セクション"
+                    extra_paragraphs: List[Dict[str, Any]] = []
+                    for paragraph in extra_section.get("paragraphs", []):
+                        text = str(paragraph.get("text") or "").strip()
+                        if not text:
+                            continue
+                        extra_paragraphs.append({
+                            "heading": paragraph.get("heading") or heading,
+                            "text": text,
+                            "citations": paragraph.get("citations", []),
+                            "claim_id": paragraph.get("claim_id"),
+                        })
+                    merged.append({"h2": heading, "paragraphs": extra_paragraphs})
+            return merged
+
+        refined_sections = merge_sections()
+
+        def normalize_entries(original: List[Dict[str, Any]], updated: Any, required_keys: List[str], *, require_id: bool = False) -> List[Dict[str, Any]]:
+            if not isinstance(updated, list) or not updated:
+                return original
+            sanitized: List[Dict[str, Any]] = []
+            for idx, item in enumerate(updated):
+                if not isinstance(item, dict):
+                    continue
+                entry: Dict[str, Any] = {}
+                for key in required_keys:
+                    value = item.get(key)
+                    if isinstance(value, str):
+                        entry[key] = value.strip()
+                    else:
+                        entry[key] = value
+                if any(not entry.get(key) for key in required_keys):
+                    continue
+                if require_id and not entry.get("id"):
+                    entry["id"] = f"{context.draft_id}-claim-{len(sanitized)+1}"
+                entry["citations"] = item.get("citations", [])
+                sanitized.append(entry)
+            return sanitized or original
+
+        refined_faq = normalize_entries(draft.get("faq", []), refined_payload.get("faq"), ["question", "answer"])
+        refined_claims = normalize_entries(
+            draft.get("claims", []),
+            refined_payload.get("claims"),
+            ["id", "text"],
+            require_id=True,
+        )
+
+        notes = []
+        if isinstance(refined_payload.get("refinement_notes"), list):
+            notes = [str(note).strip() for note in refined_payload["refinement_notes"] if str(note).strip()]
+
+        refined_draft = dict(draft)
+        refined_draft["sections"] = refined_sections
+        refined_draft["faq"] = refined_faq
+        refined_draft["claims"] = refined_claims
+        if notes:
+            refined_draft["refinement_notes"] = notes
+
+        logger.info("Job %s: refine_draft applied %d notes", context.job_id, len(notes))
+        return refined_draft
+
     def finalize_title(self, context: PipelineContext, outline: Dict, draft: Dict) -> Dict[str, Any]:
         provisional_title = str(
             outline.get("provisional_title")
@@ -1042,13 +1224,20 @@ class DraftGenerationPipeline:
         if not key_points and provisional_title:
             key_points.append(provisional_title)
 
+        refinement_notes: List[str] = []
+        if isinstance(draft, dict):
+            refinement_notes = draft.get("refinement_notes") or []
+            if not refinement_notes and isinstance(draft.get("draft"), dict):
+                refinement_notes = draft["draft"].get("refinement_notes") or []
+        notes_excerpt = "\n".join(f"- {note}" for note in refinement_notes[:3]) if refinement_notes else ""
         bullet_points = "\n".join(f"- {point}" for point in key_points if point)
         prompt = (
             "あなたは検索意図と本文を把握したSEO編集長です。"
             "以下の情報から、記事の価値を最も正確かつ魅力的に表す日本語タイトルを1つだけ生成してください。\n\n"
             f"主キーワード: {context.primary_keyword}\n"
             f"仮タイトル: {provisional_title}\n"
-            f"記事の要点:\n{bullet_points or '- 要点情報なし'}\n\n"
+            f"記事の要点:\n{bullet_points or '- 要点情報なし'}\n"
+            f"推敲メモ:\n{notes_excerpt or '- メモなし'}\n\n"
             "要件:\n"
             "1. 60文字以内\n"
             "2. 読者の課題と結論が一文で伝わる\n"
@@ -1374,6 +1563,10 @@ class DraftGenerationPipeline:
         step_start = time.time()
         draft = self.generate_draft(context, outline, citations)
         logger.info("Job %s: draft generation took %.2f seconds", job_id, time.time() - step_start)
+
+        step_start = time.time()
+        draft = self.refine_draft(context, outline, draft)
+        logger.info("Job %s: draft refinement took %.2f seconds", job_id, time.time() - step_start)
 
         step_start = time.time()
         try:
