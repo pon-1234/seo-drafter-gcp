@@ -222,7 +222,13 @@ class DraftGenerationPipeline:
         logger.info("Job %s inferred intent: %s", payload["job_id"], intent)
         return intent
 
-    def generate_outline(self, context: PipelineContext, prompt: Dict) -> Dict:
+    def generate_outline(
+        self,
+        context: PipelineContext,
+        prompt: Dict,
+        *,
+        conclusion: Optional[Dict[str, Any]] = None,
+    ) -> Dict:
         logger.info(
             "Generating outline for %s using prompt %s (mode=%s)",
             context.job_id,
@@ -238,6 +244,8 @@ class DraftGenerationPipeline:
             outline["reader_note"] = reader_note
         if "provisional_title" not in outline and outline.get("title"):
             outline["provisional_title"] = outline["title"]
+        if conclusion:
+            self._apply_conclusion_to_outline(outline, context, conclusion)
         return outline
 
     def _build_quest_title(self, primary_keyword: str, context: Optional[PipelineContext] = None) -> str:
@@ -255,6 +263,49 @@ class DraftGenerationPipeline:
             return f"{keyword_surface}の比較ガイド: 選び方と優先順位"
 
         return f"{keyword_surface}の実務ガイド: 結論と成功プロセス"
+
+    def _apply_conclusion_to_outline(
+        self,
+        outline: Dict,
+        context: PipelineContext,
+        conclusion: Optional[Dict[str, Any]],
+    ) -> None:
+        if not conclusion:
+            return
+        outline["conclusion"] = conclusion
+        main_conclusion = str(conclusion.get("main_conclusion") or "").strip()
+        if not main_conclusion:
+            return
+        sections = outline.get("h2")
+        if not isinstance(sections, list) or not sections:
+            return
+        if context.heading_mode != "manual":
+            first_heading = str(sections[0].get("text") or "").strip()
+            if "結論" not in first_heading and "まとめ" not in first_heading:
+                supporting_points = [
+                    str(point).strip()
+                    for point in conclusion.get("supporting_points", [])[:3]
+                    if str(point).strip()
+                ]
+                first_section_words = sections[0].get("estimated_words") or 260
+                outline["h2"] = [
+                    {
+                        "text": f"結論：{main_conclusion}",
+                        "purpose": "Conclusion",
+                        "estimated_words": first_section_words,
+                        "h3": [
+                            {
+                                "text": f"根拠{idx+1}: {point}",
+                                "purpose": "ConclusionEvidence",
+                            }
+                            for idx, point in enumerate(supporting_points)
+                        ],
+                    },
+                    *sections,
+                ]
+                sections = outline["h2"]
+        if isinstance(sections, list) and sections:
+            sections[0].setdefault("summary_hint", main_conclusion)
 
     @staticmethod
     def _sanitize_keyword_surface(keyword: str) -> str:
@@ -1018,7 +1069,102 @@ class DraftGenerationPipeline:
 
         return faq_items
 
-    def refine_draft(self, context: PipelineContext, outline: Dict, draft: Dict) -> Dict:
+    def extract_conclusion(self, context: PipelineContext) -> Dict[str, Any]:
+        logger.info("Deriving conclusion for job %s", context.job_id)
+        keyword_surface = self._sanitize_keyword_surface(context.primary_keyword)
+        serp_insights: List[Dict[str, Any]] = []
+        for entry in (context.serp_snapshot or [])[:6]:
+            serp_insights.append({
+                "title": entry.get("title", "")[:120],
+                "summary": entry.get("summary", "")[:200],
+                "key_points": entry.get("key_points", [])[:4],
+                "url": entry.get("url"),
+            })
+        persona = context.persona or {}
+        persona_payload = {
+            "name": persona.get("name"),
+            "goals": persona.get("goals", [])[:3],
+            "pain_points": persona.get("pain_points", [])[:3],
+            "job_to_be_done": persona.get("job_to_be_done"),
+        }
+        payload = {
+            "primary_keyword": context.primary_keyword,
+            "intent": context.intent,
+            "article_type": context.article_type,
+            "persona": persona_payload,
+            "serp_insights": serp_insights,
+            "gap_topics": context.serp_gap_topics[:5],
+        }
+        prompt = (
+            "以下の情報を読み、検索ユーザーの疑問を最も解消する結論を整理してください。"
+            "必ず JSON 形式のみで出力し、余計な文章は書かないでください。\n\n"
+            "期待するJSON構造:\n"
+            "{\n"
+            '  "main_conclusion": "検索意図に対する結論",\n'
+            '  "supporting_points": ["結論を支える理由", "..."],\n'
+            '  "evidence_needed": ["主張を裏付けるデータや事例", "..."],\n'
+            '  "differentiation_angle": "競合記事との差別化視点"\n'
+            "}\n\n"
+            f"入力データ:\n{json.dumps(payload, ensure_ascii=False)}"
+        )
+        result_payload: Dict[str, Any] = {}
+        try:
+            result = self._generate_grounded_content(
+                prompt,
+                temperature=0.35,
+                max_tokens=900,
+            )
+            raw_text = str(result.get("text") or "").strip()
+            normalized = self._strip_json_fence(raw_text)
+            parsed = json.loads(normalized)
+            if isinstance(parsed, dict):
+                result_payload = parsed
+        except Exception as exc:
+            logger.warning("Job %s: extract_conclusion failed (%s)", context.job_id, exc)
+
+        default_conclusion = {
+            "main_conclusion": (
+                result_payload.get("main_conclusion")
+                or f"{keyword_surface}で成果を出すには、読者のゴールに直結する実務的な優先順位を示すことが不可欠です。"
+            ),
+            "supporting_points": [],
+            "evidence_needed": [],
+            "differentiation_angle": result_payload.get("differentiation_angle") or "",
+        }
+
+        supporting_points = result_payload.get("supporting_points")
+        if isinstance(supporting_points, list) and supporting_points:
+            default_conclusion["supporting_points"] = [
+                str(point).strip() for point in supporting_points if str(point).strip()
+            ]
+        else:
+            fallback_points = context.serp_gap_topics[:3] or ["最新データと実例で根拠を提示", "施策の優先順位を明示", "失敗パターンと回避策をセットで提示"]
+            default_conclusion["supporting_points"] = fallback_points
+
+        evidence = result_payload.get("evidence_needed")
+        if isinstance(evidence, list) and evidence:
+            default_conclusion["evidence_needed"] = [
+                str(item).strip() for item in evidence if str(item).strip()
+            ]
+        else:
+            default_conclusion["evidence_needed"] = [
+                "最新の統計データ（国内/業界別）",
+                "成功/失敗事例の比較",
+            ]
+
+        if not default_conclusion["differentiation_angle"]:
+            default_conclusion["differentiation_angle"] = "SERP上位が触れていない読者の実務課題に寄り添う"
+
+        logger.info("Job %s: main conclusion resolved to %s", context.job_id, default_conclusion["main_conclusion"])
+        return default_conclusion
+
+    def refine_draft(
+        self,
+        context: PipelineContext,
+        outline: Dict,
+        draft: Dict,
+        conclusion: Optional[Dict[str, Any]] = None,
+    ) -> Dict:
         logger.info("Refining draft for job %s", context.job_id)
         if not isinstance(draft, dict) or "sections" not in draft:
             logger.info("Job %s: skipping refine_draft (missing sections)", context.job_id)
@@ -1053,8 +1199,12 @@ class DraftGenerationPipeline:
             "sections": trimmed_sections,
             "faq": draft.get("faq", []),
             "claims": draft.get("claims", []),
+            "conclusion": conclusion or {},
         }
         prompt_json = json.dumps(prompt_payload, ensure_ascii=False)
+        conclusion_clause = ""
+        if conclusion and conclusion.get("main_conclusion"):
+            conclusion_clause = f"\n- 以下の結論を軸に一貫性を保つこと: {conclusion['main_conclusion']}"
         instruction = (
             "あなたはシニアSEO編集長です。以下のJSONで渡すドラフトを推敲し、"
             "論理構成・重複・専門用語・結論との整合性を整えてください。\n\n"
@@ -1072,6 +1222,7 @@ class DraftGenerationPipeline:
             "- 各 paragraph は具体的で重複のない文章にする\n"
             "- FAQ/claims は要点のみ残し、不要な重複は削除\n"
             "- refinement_notes にはユーザーが後から理解できる粒度で修正理由を列挙\n\n"
+            f"{conclusion_clause}\n"
             "=== 元ドラフト(JSON) ===\n"
             f"{prompt_json}\n"
             "========================"
@@ -1189,7 +1340,13 @@ class DraftGenerationPipeline:
         logger.info("Job %s: refine_draft applied %d notes", context.job_id, len(notes))
         return refined_draft
 
-    def finalize_title(self, context: PipelineContext, outline: Dict, draft: Dict) -> Dict[str, Any]:
+    def finalize_title(
+        self,
+        context: PipelineContext,
+        outline: Dict,
+        draft: Dict,
+        conclusion: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         provisional_title = str(
             outline.get("provisional_title")
             or outline.get("title")
@@ -1231,11 +1388,22 @@ class DraftGenerationPipeline:
                 refinement_notes = draft["draft"].get("refinement_notes") or []
         notes_excerpt = "\n".join(f"- {note}" for note in refinement_notes[:3]) if refinement_notes else ""
         bullet_points = "\n".join(f"- {point}" for point in key_points if point)
+        conclusion_line = ""
+        support_clause = ""
+        if conclusion and conclusion.get("main_conclusion"):
+            conclusion_line = f"最終結論: {conclusion['main_conclusion']}\n"
+            supporting_points = [
+                str(point).strip() for point in conclusion.get("supporting_points", []) if str(point).strip()
+            ]
+            if supporting_points:
+                support_clause = "結論を支える要素:\n" + "\n".join(f"- {point}" for point in supporting_points[:3]) + "\n"
         prompt = (
             "あなたは検索意図と本文を把握したSEO編集長です。"
             "以下の情報から、記事の価値を最も正確かつ魅力的に表す日本語タイトルを1つだけ生成してください。\n\n"
             f"主キーワード: {context.primary_keyword}\n"
             f"仮タイトル: {provisional_title}\n"
+            f"{conclusion_line}"
+            f"{support_clause}"
             f"記事の要点:\n{bullet_points or '- 要点情報なし'}\n"
             f"推敲メモ:\n{notes_excerpt or '- メモなし'}\n\n"
             "要件:\n"
@@ -1547,7 +1715,11 @@ class DraftGenerationPipeline:
             tone=tone,
         )
         step_start = time.time()
-        outline = self.generate_outline(context, payload)
+        conclusion = self.extract_conclusion(context)
+        logger.info("Job %s: conclusion extraction took %.2f seconds", job_id, time.time() - step_start)
+
+        step_start = time.time()
+        outline = self.generate_outline(context, payload, conclusion=conclusion)
         logger.info("Job %s: outline generation took %.2f seconds", job_id, time.time() - step_start)
         citations: List[Dict[str, Any]] = []
         raw_citations = payload.get("citations") or []
@@ -1565,12 +1737,12 @@ class DraftGenerationPipeline:
         logger.info("Job %s: draft generation took %.2f seconds", job_id, time.time() - step_start)
 
         step_start = time.time()
-        draft = self.refine_draft(context, outline, draft)
+        draft = self.refine_draft(context, outline, draft, conclusion=conclusion)
         logger.info("Job %s: draft refinement took %.2f seconds", job_id, time.time() - step_start)
 
         step_start = time.time()
         try:
-            title_result = self.finalize_title(context, outline, draft)
+            title_result = self.finalize_title(context, outline, draft, conclusion=conclusion)
         except Exception as exc:
             logger.exception("Job %s: finalize_title crashed (%s)", job_id, exc)
             fallback_title = outline.get("provisional_title") or outline.get("title") or context.primary_keyword
@@ -1603,6 +1775,15 @@ class DraftGenerationPipeline:
             value = title_result.get(key)
             if value:
                 metadata[key] = str(value)
+        if conclusion:
+            main_conclusion = conclusion.get("main_conclusion")
+            if main_conclusion:
+                metadata["main_conclusion"] = str(main_conclusion)
+            supporting_points = [
+                str(point).strip() for point in conclusion.get("supporting_points", []) if str(point).strip()
+            ]
+            if supporting_points:
+                metadata["conclusion_points"] = " / ".join(supporting_points[:3])
         total_time = time.time() - start_time
         logger.info("Completed pipeline for job %s in %.2f seconds (%.2f minutes)", job_id, total_time, total_time / 60)
         return bundle
