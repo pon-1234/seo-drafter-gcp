@@ -535,6 +535,7 @@ def get_draft(
         paths=paths,
         metadata=metadata,
         draft_content=quality_payload,
+        meta=meta_payload or None,
         signed_urls=signed_urls or None,
         internal_links=links_payload,
         draft_text=draft_content,
@@ -614,6 +615,7 @@ def persist_draft(
         paths=paths,
         metadata=metadata,
         draft_content=quality_snapshot,
+        meta=meta or None,
         signed_urls=signed_urls or None,
         internal_links=links,
     )
@@ -821,7 +823,14 @@ def approve_draft(
         # Only include HTTP/HTTPS URLs, not gs:// paths
         if url and (url.startswith('http://') or url.startswith('https://')):
             signed_urls[key] = url
-    return quality.bundle(draft_id, paths, metadata, quality_payload, signed_urls=signed_urls or None)
+    return quality.bundle(
+        draft_id,
+        paths,
+        metadata,
+        quality_payload,
+        meta=None,
+        signed_urls=signed_urls or None,
+    )
 
 
 @router.post("/internal/jobs/cleanup-stale")

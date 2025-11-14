@@ -34,6 +34,7 @@ interface DraftBundle {
     abstract_phrase_hits?: string[];
   };
   metadata: Record<string, string>;
+  meta?: Record<string, unknown>;
   internal_links?: InternalLink[];
   draft_content?: string;
 }
@@ -57,11 +58,17 @@ function PreviewPageContent() {
   const [rewriteDetections, setRewriteDetections] = useState<{ ng: string[]; abstract: string[] }>({ ng: [], abstract: [] });
   const [rewriteLoading, setRewriteLoading] = useState(false);
   const [rewriteError, setRewriteError] = useState<string | null>(null);
+  const metaString = (key: string): string | undefined => {
+    const value = bundle?.meta?.[key];
+    return typeof value === 'string' ? value : undefined;
+  };
   const resolvedTitle =
+    metaString('final_title') ||
     bundle?.metadata?.['final_title'] ||
+    metaString('provisional_title') ||
     bundle?.metadata?.['provisional_title'] ||
     undefined;
-  const provisionalTitleValue = bundle?.metadata?.['provisional_title'];
+  const provisionalTitleValue = metaString('provisional_title') || bundle?.metadata?.['provisional_title'];
   const showProvisionalTitle =
     Boolean(provisionalTitleValue && resolvedTitle && provisionalTitleValue !== resolvedTitle);
 

@@ -296,6 +296,7 @@ class DraftBundle(BaseModel):
     signed_urls: Optional[Dict[str, HttpUrl]] = None
     quality: DraftQualitySignals
     metadata: Dict[str, str]
+    meta: Optional[Dict[str, Any]] = None
     internal_links: Optional[List[InternalLink]] = None
     draft_content: Optional[str] = None
 

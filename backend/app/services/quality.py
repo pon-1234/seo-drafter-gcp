@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from ..models import DraftBundle, DraftQualitySignals, InternalLink
 
@@ -49,6 +49,7 @@ class QualityEngine:
         paths: Dict[str, str],
         metadata: Dict[str, str],
         draft_content: Dict,
+        meta: Optional[Dict[str, Any]] = None,
         signed_urls: Optional[Dict[str, str]] = None,
         internal_links: Optional[List[Dict]] = None,
         draft_text: Optional[str] = None,
@@ -75,6 +76,7 @@ class QualityEngine:
             signed_urls=signed_urls,
             quality=quality,
             metadata=metadata,
+            meta=meta,
             internal_links=links,
             draft_content=draft_text,
         )
