@@ -53,6 +53,7 @@ class QualityEngine:
         signed_urls: Optional[Dict[str, str]] = None,
         internal_links: Optional[List[Dict]] = None,
         draft_text: Optional[str] = None,
+        diagnostics: Optional[Dict[str, Any]] = None,
     ) -> DraftBundle:
         quality = self.evaluate(draft_content)
 
@@ -70,6 +71,8 @@ class QualityEngine:
                 for link in internal_links
             ]
 
+        diagnostics = diagnostics or {}
+
         return DraftBundle(
             draft_id=draft_id,
             gcs_paths=paths,
@@ -79,4 +82,7 @@ class QualityEngine:
             meta=meta,
             internal_links=links,
             draft_content=draft_text,
+            style_rewrite_metrics=diagnostics.get("style_rewrite_metrics"),
+            style_rewritten=diagnostics.get("style_rewritten"),
+            validation_warnings=diagnostics.get("validation_warnings", []),
         )

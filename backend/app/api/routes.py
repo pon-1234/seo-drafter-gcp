@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
 import uuid
@@ -409,8 +410,6 @@ def get_draft(
     quality: QualityEngine = Depends(get_quality_engine),
     firestore_repo: FirestoreRepository = Depends(get_firestore),
 ) -> DraftBundle:
-    import json
-
     # List artifacts from GCS or local store
     artifacts = store.list_artifacts(draft_id)
 
@@ -445,6 +444,7 @@ def get_draft(
     draft_content = None
     meta_payload = {}
     outline_payload = {}
+    style_diagnostics = {}
 
     for filename, full_path in artifacts.items():
         if filename == "quality.json":
@@ -478,6 +478,13 @@ def get_draft(
                     outline_payload = json.loads(data)
                 except json.JSONDecodeError:
                     logger.warning("Outline payload for %s is not valid JSON", draft_id)
+        elif filename == "style_diagnostics.json":
+            data = store.read_artifact(full_path)
+            if data:
+                try:
+                    style_diagnostics = json.loads(data)
+                except json.JSONDecodeError:
+                    logger.warning("Style diagnostics payload for %s is not valid JSON", draft_id)
 
     # Build paths dict and signed URLs
     paths = artifacts
@@ -539,6 +546,7 @@ def get_draft(
         signed_urls=signed_urls or None,
         internal_links=links_payload,
         draft_text=draft_content,
+        diagnostics=style_diagnostics or None,
     )
 
 
@@ -559,6 +567,20 @@ def persist_draft(
     meta = outputs.get("meta", {})
     links = outputs.get("links", [])
     quality_snapshot = outputs.get("quality", {})
+    style_metrics = outputs.get("style_rewrite_metrics")
+    style_rewritten = outputs.get("style_rewritten")
+    validation_warnings_raw = outputs.get("validation_warnings") or []
+    if isinstance(validation_warnings_raw, list):
+        validation_warnings = [str(item) for item in validation_warnings_raw if str(item)]
+    else:
+        validation_warnings = [str(validation_warnings_raw)]
+    diagnostics_payload = {
+        "style_rewrite_metrics": style_metrics,
+        "style_rewritten": style_rewritten,
+        "validation_warnings": validation_warnings,
+    }
+    sections_original = outputs.get("sections_original")
+    sections_rewritten = outputs.get("sections_rewritten")
 
     outline_path = store.save_artifact(draft_id, "outline.json", outline)
     draft_md = _render_markdown(draft, outline)
@@ -566,6 +588,23 @@ def persist_draft(
     meta_path = store.save_artifact(draft_id, "meta.json", meta)
     links_path = store.save_artifact(draft_id, "links.json", {"suggestions": links})
     quality_path = store.save_artifact(draft_id, "quality.json", quality_snapshot)
+    diagnostics_path = None
+    if style_metrics or validation_warnings or style_rewritten:
+        diagnostics_path = store.save_artifact(draft_id, "style_diagnostics.json", diagnostics_payload)
+    sections_original_path = None
+    if sections_original:
+        sections_original_path = store.save_raw(
+            draft_id,
+            "sections.json",
+            json.dumps(sections_original, ensure_ascii=False, indent=2),
+        )
+    sections_rewritten_path = None
+    if sections_rewritten:
+        sections_rewritten_path = store.save_raw(
+            draft_id,
+            "sections_rewritten.json",
+            json.dumps(sections_rewritten, ensure_ascii=False, indent=2),
+        )
 
     firestore_repo.update_job(
         payload.job_id,
@@ -594,6 +633,12 @@ def persist_draft(
         "links": links_path,
         "quality": quality_path,
     }
+    if diagnostics_path:
+        paths["style_diagnostics"] = diagnostics_path
+    if sections_original_path:
+        paths["sections"] = sections_original_path
+    if sections_rewritten_path:
+        paths["sections_rewritten"] = sections_rewritten_path
     signed_urls = {}
     for key, path_value in paths.items():
         url = store.get_signed_url(path_value)
@@ -618,6 +663,7 @@ def persist_draft(
         meta=meta or None,
         signed_urls=signed_urls or None,
         internal_links=links,
+        diagnostics=diagnostics_payload if (style_metrics or validation_warnings or style_rewritten) else None,
     )
     return bundle
 

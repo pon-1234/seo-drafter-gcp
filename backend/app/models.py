@@ -299,6 +299,9 @@ class DraftBundle(BaseModel):
     meta: Optional[Dict[str, Any]] = None
     internal_links: Optional[List[InternalLink]] = None
     draft_content: Optional[str] = None
+    style_rewrite_metrics: Optional[Dict[str, Any]] = None
+    style_rewritten: Optional[bool] = None
+    validation_warnings: List[str] = Field(default_factory=list)
 
 
 class DraftApproveRequest(BaseModel):

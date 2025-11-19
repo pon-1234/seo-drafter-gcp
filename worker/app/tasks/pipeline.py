@@ -2,15 +2,20 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
-from concurrent.futures import ThreadPoolExecutor, as_completed
-
 
 from shared.internal_links import InternalLinkRepository
-from shared.style import NG_PHRASES, ABSTRACT_PATTERNS
+from shared.persona_utils import build_intro_persona_clause, infer_japanese_persona_label
 from shared.project_defaults import get_project_defaults, get_prompt_layers_for_expertise
+from shared.style import ABSTRACT_PATTERNS, NG_PHRASES
+from .style_rewrite import StructurePreservingStyleRewriter
+from ..validators import StructureValidator
 
 # OpenAI Gateway is now local to worker
 try:
@@ -63,6 +68,8 @@ class DraftGenerationPipeline:
         self.max_workers = max(int(getattr(self.settings, "llm_max_workers", 4) or 4), 1)
         self.ai_gateway = None
         self._active_llm: Dict[str, Any] = {"provider": None, "model": None, "temperature": None}
+        self.style_rewriter = StructurePreservingStyleRewriter(None)
+        self.structure_validator = StructureValidator()
 
         if not OpenAIGateway:
             logger.error("OpenAI gateway implementation is not available")
@@ -111,6 +118,8 @@ class DraftGenerationPipeline:
             anthropic_api_key=self.settings.anthropic_api_key,
         )
         self._active_llm = {"provider": provider, "model": model, "temperature": temperature}
+        if self.style_rewriter:
+            self.style_rewriter.update_gateway(self.ai_gateway)
 
     @staticmethod
     def _normalize_serp_snapshot(raw_snapshot: Any) -> List[Dict[str, Any]]:
@@ -345,32 +354,31 @@ class DraftGenerationPipeline:
         return text
 
     def _build_reader_note(self, context: PipelineContext) -> str:
-        persona = context.persona or {}
-        fallback_targets = {
-            "beginner": "中小企業のBtoB担当者",
-            "intermediate": "社内のマーケティングリーダー",
-            "expert": "事業・プロダクト責任者",
-        }
+        persona = dict(context.persona) if isinstance(context.persona, dict) else {}
+        if "expertise_level" not in persona:
+            persona["expertise_level"] = context.expertise_level
+
+        persona_label = infer_japanese_persona_label(persona, context.writer_persona)
+        intro_clause = build_intro_persona_clause(persona_label)
+
         fallback_levels = {
             "beginner": "用語はなんとなく知っていて基礎を整理したい層",
             "intermediate": "施策を体系立てて比較検討したい層",
             "expert": "戦略と実行を同時に見直したい層",
         }
-        target = persona.get("name") or persona.get("job_to_be_done") or fallback_targets.get(
-            context.expertise_level, "マーケティング担当者"
-        )
         level_hint = persona.get("reading_level") or fallback_levels.get(
             context.expertise_level, "実務で成果を出したい層"
         )
         goals = [str(goal).strip() for goal in persona.get("goals", []) if str(goal).strip()]
         job_to_be_done = str(persona.get("job_to_be_done") or "").strip()
         if goals:
-            action_clause = f"が{goals[0]}ための"
+            detail_clause = f"特に「{goals[0]}」ための考え方と手順を整理しました。"
         elif job_to_be_done:
-            action_clause = f"が{job_to_be_done}ための"
+            detail_clause = f"「{job_to_be_done}」を実現するまでのステップをわかりやすくまとめています。"
         else:
-            action_clause = "向けの"
-        return f"本記事は、{target}（{level_hint}）{action_clause}ガイドです。"
+            detail_clause = "実務で迷ったときの判断材料としてご活用ください。"
+
+        return f"{intro_clause}{level_hint}の視点で、{detail_clause}"
 
     def _outline_from_manual(self, context: PipelineContext, prompt: Dict) -> Dict:
         sections = []
@@ -931,6 +939,25 @@ class DraftGenerationPipeline:
 
         writer = context.writer_persona or {}
         writer_name = writer.get("name") or "シニアSEOライター"
+        writer_role = writer.get("role") or "シニアSEO編集者"
+        writer_voice = writer.get("voice") or "落ち着いた敬体で簡潔に説明する"
+        writer_expertise = writer.get("expertise") or "SEOとB2Bマーケに精通"
+        writer_mission = writer.get("mission") or "読者の迷いを解き行動を後押しする"
+        raw_qualities = writer.get("qualities") or []
+        if isinstance(raw_qualities, list):
+            writer_qualities = " / ".join(str(item).strip() for item in raw_qualities if str(item).strip())
+        elif isinstance(raw_qualities, str):
+            writer_qualities = raw_qualities.strip()
+        else:
+            writer_qualities = ""
+        if not writer_qualities:
+            writer_qualities = "抽象→具体への往復 / QUESTやVAKなどのフレームでストーリーを描写"
+        persona_payload = dict(context.persona) if isinstance(context.persona, dict) else {}
+        if "expertise_level" not in persona_payload:
+            persona_payload["expertise_level"] = context.expertise_level
+        persona_label = infer_japanese_persona_label(persona_payload, context.writer_persona)
+        persona_intro_clause = build_intro_persona_clause(persona_label)
+
         reader_name = context.persona.get("name") or "読者"
         reader_tone = context.persona.get("tone") or "実務的"
 
@@ -950,6 +977,11 @@ class DraftGenerationPipeline:
             "level": level.upper(),
             "primary_keyword": context.primary_keyword or heading,
             "reader_profile": reader_profile,
+            "writer_role": writer_role,
+            "writer_voice": writer_voice,
+            "writer_expertise": writer_expertise,
+            "writer_mission": writer_mission,
+            "writer_qualities": writer_qualities,
             "cta": context.cta or "適切な次のアクションを選べる",
             "references": references,
             "preferred_sources": preferred_sources,
@@ -959,6 +991,8 @@ class DraftGenerationPipeline:
             "intent": context.intent,
             "section_goal": section_goal,
             "gap_topics": gap_topics,
+            "persona_label": persona_label,
+            "persona_intro": persona_intro_clause,
         }
 
         system_template = prompt_layers.get("system", "")
@@ -1012,6 +1046,135 @@ class DraftGenerationPipeline:
             return 1
 
         return sorted(sources, key=score)
+
+    def _maybe_apply_style_rewrite(self, draft: Dict, context: PipelineContext) -> Dict[str, Any]:
+        diagnostics = {
+            "style_rewritten": False,
+            "style_rewrite_metrics": None,
+            "sections_original": None,
+            "sections_rewritten": None,
+            "validation_warnings": [],
+        }
+        if os.getenv("ENABLE_STYLE_REWRITE", "false").lower() != "true":
+            return diagnostics
+        if not self.style_rewriter or not self.ai_gateway:
+            logger.info("Style rewrite requested but AI gateway is not available for job %s", context.job_id)
+            return diagnostics
+
+        sections = draft.get("sections")
+        if not isinstance(sections, list) or not sections:
+            logger.warning("Job %s: skipping style rewrite (no sections)", context.job_id)
+            return diagnostics
+
+        paragraph_total = self._count_rewritable_paragraphs(sections)
+        if paragraph_total == 0:
+            logger.info("Job %s: skipping style rewrite (no paragraphs)", context.job_id)
+            return diagnostics
+
+        sample_mode = os.getenv("STYLE_REWRITE_SAMPLE_ONLY", "false").lower() == "true"
+        try:
+            configured_workers = int(os.getenv("STYLE_REWRITE_MAX_WORKERS", self.max_workers))
+        except ValueError:
+            configured_workers = self.max_workers
+        max_workers = max(1, configured_workers)
+        processed_count = min(paragraph_total, 3) if sample_mode else paragraph_total
+        save_variants = os.getenv("SAVE_AB_VARIANTS", "false").lower() == "true"
+        original_sections = deepcopy(sections) if save_variants else None
+
+        logger.info(
+            "Job %s: starting style rewrite (paragraphs=%d, sample=%s, workers=%d)",
+            context.job_id,
+            processed_count,
+            sample_mode,
+            max_workers,
+        )
+        start_time = time.time()
+        try:
+            rewritten_sections = self.style_rewriter.rewrite_sections(
+                sections=sections,
+                max_workers=max_workers,
+                sample_only=sample_mode,
+            )
+        except Exception as exc:  # pragma: no cover - defensive guard
+            logger.warning("Job %s: style rewrite failed (%s)", context.job_id, exc)
+            return diagnostics
+        elapsed = time.time() - start_time
+        draft["sections"] = rewritten_sections
+
+        diagnostics["style_rewritten"] = True
+        diagnostics["style_rewrite_metrics"] = {
+            "elapsed_seconds": elapsed,
+            "paragraph_count": processed_count,
+            "seconds_per_paragraph": elapsed / max(processed_count, 1),
+            "total_paragraph_count": paragraph_total,
+            "sample_only": sample_mode,
+        }
+        if save_variants and original_sections is not None:
+            diagnostics["sections_original"] = original_sections
+            diagnostics["sections_rewritten"] = deepcopy(rewritten_sections)
+        logger.info(
+            "Job %s: style rewrite completed in %.2fs (%.2fs/paragraph)",
+            context.job_id,
+            elapsed,
+            elapsed / max(processed_count, 1),
+        )
+        return diagnostics
+
+    @staticmethod
+    def _count_rewritable_paragraphs(sections: List[Dict[str, Any]]) -> int:
+        count = 0
+        for section in sections:
+            for paragraph in section.get("paragraphs", []):
+                text = str(paragraph.get("text") or "").strip()
+                if text:
+                    count += 1
+        return count
+
+    def _render_markdown_snapshot(self, draft: Dict, outline: Dict, context: PipelineContext) -> str:
+        sections = draft.get("sections", []) if isinstance(draft, dict) else []
+        lines: List[str] = []
+        title = ""
+        if isinstance(outline, dict):
+            title = str(outline.get("title") or outline.get("provisional_title") or "").strip()
+        if not title:
+            title = str(draft.get("title") or context.primary_keyword or "生成ドラフト").strip()
+        lines.append(f"# {title}")
+        reader_note = ""
+        if isinstance(outline, dict):
+            reader_note = str(outline.get("reader_note") or "").strip()
+        if reader_note:
+            lines.append(reader_note)
+            lines.append("")
+
+        for section in sections:
+            h2_title = str(section.get("h2") or section.get("heading") or "").strip()
+            if not h2_title:
+                continue
+            lines.append(f"## {h2_title}")
+            for paragraph in section.get("paragraphs", []):
+                text = str(paragraph.get("text") or "").strip()
+                if text:
+                    lines.append(text)
+                    lines.append("")
+
+        return "\n".join(lines)
+
+    def _collect_structure_warnings(self, markdown_snapshot: str) -> List[str]:
+        if not markdown_snapshot.strip():
+            return []
+
+        warnings: List[str] = []
+        warnings.extend(self.structure_validator.validate_headings(markdown_snapshot))
+        warnings.extend(self.structure_validator.validate_sentence_length(markdown_snapshot))
+        warnings.extend(self.structure_validator.check_style_consistency(markdown_snapshot))
+
+        deduped: List[str] = []
+        seen = set()
+        for warning in warnings:
+            if warning and warning not in seen:
+                deduped.append(warning)
+                seen.add(warning)
+        return deduped
 
     def _generate_grounded_content(
         self,
@@ -1612,7 +1775,6 @@ class DraftGenerationPipeline:
         }
 
     def run(self, payload: Dict) -> Dict:
-        import time
         start_time = time.time()
         job_id = payload["job_id"]
         logger.info("Starting pipeline for job %s", job_id)
@@ -1739,6 +1901,10 @@ class DraftGenerationPipeline:
         step_start = time.time()
         draft = self.refine_draft(context, outline, draft, conclusion=conclusion)
         logger.info("Job %s: draft refinement took %.2f seconds", job_id, time.time() - step_start)
+        style_diagnostics = self._maybe_apply_style_rewrite(draft, context)
+        markdown_snapshot = self._render_markdown_snapshot(draft, outline, context)
+        structure_warnings = self._collect_structure_warnings(markdown_snapshot)
+        style_diagnostics["validation_warnings"] = structure_warnings
 
         step_start = time.time()
         try:
@@ -1764,6 +1930,11 @@ class DraftGenerationPipeline:
 
         step_start = time.time()
         quality = self.evaluate_quality(draft, context)
+        if style_diagnostics.get("style_rewrite_metrics"):
+            quality["style_rewrite_metrics"] = style_diagnostics["style_rewrite_metrics"]
+        quality["style_rewritten"] = style_diagnostics.get("style_rewritten", False)
+        if structure_warnings:
+            quality["validation_warnings"] = structure_warnings
         logger.info("Job %s: quality evaluation took %.2f seconds", job_id, time.time() - step_start)
 
         bundle = self.bundle_outputs(context, outline, draft, meta, links, quality)
@@ -1775,6 +1946,14 @@ class DraftGenerationPipeline:
             value = title_result.get(key)
             if value:
                 metadata[key] = str(value)
+        if style_diagnostics.get("style_rewrite_metrics"):
+            bundle["style_rewrite_metrics"] = style_diagnostics["style_rewrite_metrics"]
+        bundle["style_rewritten"] = style_diagnostics.get("style_rewritten", False)
+        if structure_warnings:
+            bundle["validation_warnings"] = structure_warnings
+        if style_diagnostics.get("sections_original") and style_diagnostics.get("sections_rewritten"):
+            bundle["sections_original"] = style_diagnostics["sections_original"]
+            bundle["sections_rewritten"] = style_diagnostics["sections_rewritten"]
         if conclusion:
             main_conclusion = conclusion.get("main_conclusion")
             if main_conclusion:

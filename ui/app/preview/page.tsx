@@ -16,6 +16,14 @@ interface InternalLink {
   snippet?: string;
 }
 
+interface StyleRewriteMetrics {
+  elapsed_seconds: number;
+  paragraph_count: number;
+  seconds_per_paragraph: number;
+  total_paragraph_count?: number;
+  sample_only?: boolean;
+}
+
 interface DraftBundle {
   draft_id: string;
   gcs_paths: Record<string, string>;
@@ -37,6 +45,9 @@ interface DraftBundle {
   meta?: Record<string, unknown>;
   internal_links?: InternalLink[];
   draft_content?: string;
+  style_rewrite_metrics?: StyleRewriteMetrics | null;
+  style_rewritten?: boolean;
+  validation_warnings?: string[];
 }
 
 interface RewriteResponsePayload {
@@ -432,6 +443,49 @@ function PreviewPageContent() {
                         </div>
                       )}
                     </div>
+                  </div>
+                )}
+
+                {(bundle.style_rewrite_metrics || (bundle.validation_warnings && bundle.validation_warnings.length > 0)) && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-semibold text-slate-800 border-b border-slate-200 pb-1">スタイル調整</h4>
+                    <div className="grid gap-2 text-sm">
+                      <div className="flex items-start gap-3">
+                        <span className="w-24 flex-shrink-0 text-slate-600">適用状況:</span>
+                        <span className="text-slate-900">
+                          {bundle.style_rewritten ? 'LLMリライト適用済み' : '未適用（原文のまま）'}
+                        </span>
+                      </div>
+                      {bundle.style_rewrite_metrics ? (
+                        <>
+                          <div className="flex items-start gap-3">
+                            <span className="w-24 flex-shrink-0 text-slate-600">処理時間:</span>
+                            <span className="text-slate-900">
+                              {bundle.style_rewrite_metrics.elapsed_seconds.toFixed(2)} 秒 /{' '}
+                              {bundle.style_rewrite_metrics.paragraph_count} 段落
+                            </span>
+                          </div>
+                          <div className="flex items-start gap-3">
+                            <span className="w-24 flex-shrink-0 text-slate-600">平均:</span>
+                            <span className="text-slate-900">
+                              {bundle.style_rewrite_metrics.seconds_per_paragraph.toFixed(2)} 秒 / 段落
+                              {bundle.style_rewrite_metrics.sample_only ? '（サンプルモード）' : ''}
+                            </span>
+                          </div>
+                        </>
+                      ) : null}
+                    </div>
+                    {bundle.validation_warnings && bundle.validation_warnings.length > 0 ? (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                        <p className="font-semibold">検出された注意事項</p>
+                        <ul className="mt-2 list-disc pl-5">
+                          {bundle.validation_warnings.map((warning, index) => (
+                            <li key={`${warning}-${index}`}>{warning}</li>
+                          ))}
+                        </ul>
+                        <p className="mt-2 text-[11px] text-amber-800">最終チェック時に目視でご確認ください。</p>
+                      </div>
+                    ) : null}
                   </div>
                 )}
 
