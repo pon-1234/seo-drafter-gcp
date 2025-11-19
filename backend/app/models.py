@@ -302,6 +302,7 @@ class DraftBundle(BaseModel):
     style_rewrite_metrics: Optional[Dict[str, Any]] = None
     style_rewritten: Optional[bool] = None
     validation_warnings: List[str] = Field(default_factory=list)
+    editor_checklist: Optional[str] = None
 
 
 class DraftApproveRequest(BaseModel):

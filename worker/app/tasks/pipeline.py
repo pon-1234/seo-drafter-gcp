@@ -8,6 +8,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from shared.internal_links import InternalLinkRepository
@@ -1176,6 +1177,16 @@ class DraftGenerationPipeline:
                 seen.add(warning)
         return deduped
 
+    def _generate_editor_checklist(self, warnings: List[str]) -> str:
+        template_path = Path(__file__).resolve().parents[3] / "shared" / "prompts" / "editor_checklist.txt"
+        try:
+            template = template_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            template = "自動検出された警告:\n{{VALIDATION_WARNINGS}}"
+
+        warnings_text = "\n".join(f"- {warning}" for warning in warnings) if warnings else "（特になし）"
+        return template.replace("{{VALIDATION_WARNINGS}}", warnings_text)
+
     def _generate_grounded_content(
         self,
         prompt: Optional[str] = None,
@@ -1905,6 +1916,8 @@ class DraftGenerationPipeline:
         markdown_snapshot = self._render_markdown_snapshot(draft, outline, context)
         structure_warnings = self._collect_structure_warnings(markdown_snapshot)
         style_diagnostics["validation_warnings"] = structure_warnings
+        editor_checklist = self._generate_editor_checklist(structure_warnings)
+        style_diagnostics["editor_checklist"] = editor_checklist
 
         step_start = time.time()
         try:
@@ -1935,6 +1948,8 @@ class DraftGenerationPipeline:
         quality["style_rewritten"] = style_diagnostics.get("style_rewritten", False)
         if structure_warnings:
             quality["validation_warnings"] = structure_warnings
+        if editor_checklist:
+            quality["editor_checklist"] = editor_checklist
         logger.info("Job %s: quality evaluation took %.2f seconds", job_id, time.time() - step_start)
 
         bundle = self.bundle_outputs(context, outline, draft, meta, links, quality)
@@ -1954,6 +1969,7 @@ class DraftGenerationPipeline:
         if style_diagnostics.get("sections_original") and style_diagnostics.get("sections_rewritten"):
             bundle["sections_original"] = style_diagnostics["sections_original"]
             bundle["sections_rewritten"] = style_diagnostics["sections_rewritten"]
+        bundle["editor_checklist"] = editor_checklist
         if conclusion:
             main_conclusion = conclusion.get("main_conclusion")
             if main_conclusion:

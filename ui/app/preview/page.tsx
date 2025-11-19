@@ -48,6 +48,7 @@ interface DraftBundle {
   style_rewrite_metrics?: StyleRewriteMetrics | null;
   style_rewritten?: boolean;
   validation_warnings?: string[];
+  editor_checklist?: string | null;
 }
 
 interface RewriteResponsePayload {
@@ -486,6 +487,17 @@ function PreviewPageContent() {
                         <p className="mt-2 text-[11px] text-amber-800">最終チェック時に目視でご確認ください。</p>
                       </div>
                     ) : null}
+                  </div>
+                )}
+
+                {bundle.editor_checklist && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-semibold text-slate-800 border-b border-slate-200 pb-1">
+                      ライター向けチェックリスト
+                    </h4>
+                    <pre className="whitespace-pre-wrap rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-800">
+                      {bundle.editor_checklist}
+                    </pre>
                   </div>
                 )}
 

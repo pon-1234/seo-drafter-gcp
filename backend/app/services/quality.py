@@ -54,6 +54,7 @@ class QualityEngine:
         internal_links: Optional[List[Dict]] = None,
         draft_text: Optional[str] = None,
         diagnostics: Optional[Dict[str, Any]] = None,
+        editor_checklist: Optional[str] = None,
     ) -> DraftBundle:
         quality = self.evaluate(draft_content)
 
@@ -85,4 +86,5 @@ class QualityEngine:
             style_rewrite_metrics=diagnostics.get("style_rewrite_metrics"),
             style_rewritten=diagnostics.get("style_rewritten"),
             validation_warnings=diagnostics.get("validation_warnings", []),
+            editor_checklist=editor_checklist,
         )

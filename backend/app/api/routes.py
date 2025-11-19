@@ -444,6 +444,7 @@ def get_draft(
     draft_content = None
     meta_payload = {}
     outline_payload = {}
+    editor_checklist_text = None
     style_diagnostics = {}
 
     for filename, full_path in artifacts.items():
@@ -485,6 +486,8 @@ def get_draft(
                     style_diagnostics = json.loads(data)
                 except json.JSONDecodeError:
                     logger.warning("Style diagnostics payload for %s is not valid JSON", draft_id)
+        elif filename == "editor_checklist.md":
+            editor_checklist_text = store.read_artifact(full_path)
 
     # Build paths dict and signed URLs
     paths = artifacts
@@ -547,6 +550,7 @@ def get_draft(
         internal_links=links_payload,
         draft_text=draft_content,
         diagnostics=style_diagnostics or None,
+        editor_checklist=editor_checklist_text,
     )
 
 
@@ -588,6 +592,7 @@ def persist_draft(
     meta_path = store.save_artifact(draft_id, "meta.json", meta)
     links_path = store.save_artifact(draft_id, "links.json", {"suggestions": links})
     quality_path = store.save_artifact(draft_id, "quality.json", quality_snapshot)
+    editor_checklist = outputs.get("editor_checklist")
     diagnostics_path = None
     if style_metrics or validation_warnings or style_rewritten:
         diagnostics_path = store.save_artifact(draft_id, "style_diagnostics.json", diagnostics_payload)
@@ -605,6 +610,9 @@ def persist_draft(
             "sections_rewritten.json",
             json.dumps(sections_rewritten, ensure_ascii=False, indent=2),
         )
+    editor_checklist_path = None
+    if editor_checklist:
+        editor_checklist_path = store.save_raw(draft_id, "editor_checklist.md", editor_checklist)
 
     firestore_repo.update_job(
         payload.job_id,
@@ -639,6 +647,8 @@ def persist_draft(
         paths["sections"] = sections_original_path
     if sections_rewritten_path:
         paths["sections_rewritten"] = sections_rewritten_path
+    if editor_checklist_path:
+        paths["editor_checklist"] = editor_checklist_path
     signed_urls = {}
     for key, path_value in paths.items():
         url = store.get_signed_url(path_value)
@@ -664,6 +674,7 @@ def persist_draft(
         signed_urls=signed_urls or None,
         internal_links=links,
         diagnostics=diagnostics_payload if (style_metrics or validation_warnings or style_rewritten) else None,
+        editor_checklist=editor_checklist,
     )
     return bundle
 
@@ -949,3 +960,6 @@ def get_quality_kpis(limit: int = 100, store: FirestoreRepository = Depends(get_
         ng_phrase_rate=ng_phrase_rate,
         abstract_phrase_rate=abstract_phrase_rate,
     )
+    editor_checklist_path = None
+    if editor_checklist:
+        editor_checklist_path = store.save_raw(draft_id, "editor_checklist.md", editor_checklist)

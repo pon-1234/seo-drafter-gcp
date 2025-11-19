@@ -6,6 +6,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from shared.terminology import expand_abbreviations, normalize_slash_expressions
+
 logger = logging.getLogger(__name__)
 
 
@@ -100,7 +102,8 @@ class StructurePreservingStyleRewriter:
         if not text or not self.ai_gateway:
             return text
 
-        prompt = self.prompt_template.replace("{{PARAGRAPH_TEXT}}", text)
+        prepared_text = apply_basic_style_fixes(text)
+        prompt = self.prompt_template.replace("{{PARAGRAPH_TEXT}}", prepared_text)
         try:
             result = self.ai_gateway.generate_with_grounding(
                 messages=[{"role": "user", "content": prompt}],
@@ -120,7 +123,13 @@ def apply_basic_style_fixes(text: str) -> str:
     if not text:
         return text
 
-    updated = re.sub(r"([ぁ-んァ-ヶ一-龥A-Za-z0-9]+/[ぁ-んァ-ヶ一-龥A-Za-z0-9]+/[ぁ-んァ-ヶ一-龥A-Za-z0-9]+)", _replace_slash_sequence, text)
+    updated = normalize_slash_expressions(text)
+    updated = expand_abbreviations(updated)
+    updated = re.sub(
+        r"([ぁ-んァ-ヶ一-龥A-Za-z0-9]+/[ぁ-んァ-ヶ一-龥A-Za-z0-9]+/[ぁ-んァ-ヶ一-龥A-Za-z0-9]+)",
+        _replace_slash_sequence,
+        updated,
+    )
     updated = re.sub(r"である。", "です。", updated)
     updated = re.sub(r"にある。", "にあります。", updated)
     return updated
