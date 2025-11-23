@@ -1337,6 +1337,13 @@ class DraftGenerationPipeline:
             logger.info("Generated content: %d characters", len(result.get("text", "")))
             return result
         except Exception as e:
+            # 失敗時もプロンプトを残す
+            try:
+                error_info = dict(log_info or {})
+                error_info["error"] = str(e)
+                self._log_prompt_snapshot(prompt=prompt, messages=messages, log_info=error_info)
+            except Exception:
+                pass
             logger.error("Content generation failed: %s", e)
             raise
 
