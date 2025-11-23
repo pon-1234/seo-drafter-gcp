@@ -431,8 +431,11 @@ class DraftGenerationPipeline:
         for heading in context.heading_overrides:
             sections.append(
                 {
+                    "id": f"sec{len(sections)+1}",
+                    "level": "h2",
                     "text": heading,
                     "purpose": "Custom",
+                    "section_goal": self._derive_section_goal(heading, context),
                     "estimated_words": budget,
                     "h3": [],
                 }
@@ -461,8 +464,11 @@ class DraftGenerationPipeline:
         for gap_topic in context.serp_gap_topics[:max_gap_topics]:
             template_sections.append(
                 {
+                    "id": f"sec{len(template_sections)+1}",
+                    "level": "h2",
                     "text": f"{gap_topic}の差別化と未カバー情報",
                     "purpose": "Gap",
+                    "section_goal": self._derive_section_goal(f"{gap_topic}の差別化と未カバー情報", context),
                     "h3": [
                         {"text": f"{gap_topic}の現状データと根拠", "purpose": "Gap"},
                         {"text": f"{gap_topic}で提示する具体的な打ち手", "purpose": "Gap"},
@@ -868,8 +874,11 @@ class DraftGenerationPipeline:
         for section in templates.get(article_type, default_information_template):
             resolved.append(
                 {
+                    "id": f"sec{len(resolved)+1}",
+                    "level": "h2",
                     "text": section["text"],
                     "purpose": section.get("purpose", "Know"),
+                    "section_goal": self._derive_section_goal(section["text"], context),
                     "h3": [dict(item) for item in section.get("h3", [])],
                 }
             )
@@ -894,8 +903,8 @@ class DraftGenerationPipeline:
         sections: List[Dict[str, Any]] = []
         all_claims: List[Dict[str, Any]] = []
 
-        def build_paragraph(heading_text: str, level: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-            messages = self._build_prompt_messages(heading_text, level, context)
+        def build_paragraph(heading_text: str, level: str, section_goal: Optional[str]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+            messages = self._build_prompt_messages(heading_text, level, context, section_goal=section_goal)
             grounded_result = self._generate_grounded_content(
                 messages=messages,
                 temperature=context.llm_temperature,
@@ -943,12 +952,13 @@ class DraftGenerationPipeline:
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             for h2_index, h2 in enumerate(outline_h2):
                 h3_list = h2.get("h3", [])
+                section_goal = h2.get("section_goal") or self._derive_section_goal(h2.get("text", "") or h2.get("heading", ""), context)
                 if h3_list:
                     for h3_index, h3 in enumerate(h3_list):
-                        future = executor.submit(build_paragraph, h3["text"], "h3")
+                        future = executor.submit(build_paragraph, h3["text"], "h3", section_goal)
                         future_map[future] = (h2_index, h3_index)
                 else:
-                    future = executor.submit(build_paragraph, h2["text"], "h2")
+                    future = executor.submit(build_paragraph, h2["text"], "h2", section_goal)
                     future_map[future] = (h2_index, 0)
 
             for future in as_completed(future_map):
@@ -990,7 +1000,7 @@ class DraftGenerationPipeline:
             "claims": all_claims,
         }
 
-    def _build_prompt_messages(self, heading: str, level: str, context: PipelineContext) -> List[Dict[str, str]]:
+    def _build_prompt_messages(self, heading: str, level: str, context: PipelineContext, section_goal: Optional[str] = None) -> List[Dict[str, str]]:
         """Build layered prompt messages (system/developer/user)."""
         # Select prompt layers based on expertise level and project defaults
         expertise_layers = get_prompt_layers_for_expertise(context.expertise_level)
@@ -1042,7 +1052,7 @@ class DraftGenerationPipeline:
         gap_topics = ", ".join(context.serp_gap_topics[:3]) if context.serp_gap_topics else "差別化指示なし"
 
         reader_profile = self._render_reader_profile(context.persona, reader_tone)
-        section_goal = self._derive_section_goal(heading, context)
+        section_goal = section_goal or self._derive_section_goal(heading, context)
 
         format_payload = {
             "writer_name": writer_name,
@@ -1285,6 +1295,43 @@ class DraftGenerationPipeline:
 
         return "\n".join(lines)
 
+    @staticmethod
+    def _normalize_markdown_structure(markdown_snapshot: str) -> str:
+        """Normalize headings (single H1, strip template labels) and collapse blank lines."""
+        if not markdown_snapshot:
+            return markdown_snapshot
+        import re
+
+        lines = markdown_snapshot.splitlines()
+        normalized: List[str] = []
+        first_h1_seen = False
+        for line in lines:
+            stripped = line.rstrip()
+            heading_match = re.match(r"^(#+)\s+(.*)$", stripped)
+            if heading_match:
+                hashes, text = heading_match.groups()
+                if hashes == "#":
+                    if first_h1_seen:
+                        hashes = "##"
+                    else:
+                        first_h1_seen = True
+                # Remove template labels like Q/U:, E/S:, T:
+                text = re.sub(r"^(Q/U:|E/S:|T:)\s*", "", text)
+                stripped = f"{hashes} {text}".strip()
+            normalized.append(stripped)
+
+        # Collapse multiple blank lines
+        collapsed: List[str] = []
+        prev_blank = False
+        for line in normalized:
+            is_blank = not line.strip()
+            if is_blank and prev_blank:
+                continue
+            collapsed.append(line)
+            prev_blank = is_blank
+
+        return "\n".join(collapsed)
+
     def _collect_structure_warnings(self, markdown_snapshot: str) -> List[str]:
         if not markdown_snapshot.strip():
             return []
@@ -1357,6 +1404,11 @@ class DraftGenerationPipeline:
         if not getattr(self.settings, "log_prompts", False):
             return
         try:
+            level_name = str(getattr(self.settings, "log_prompts_severity", "INFO")).upper()
+            severity = getattr(logging, level_name, logging.INFO)
+        except Exception:
+            severity = logging.INFO
+        try:
             max_chars = int(getattr(self.settings, "log_prompts_max_chars", 2000) or 0)
         except Exception:
             max_chars = 2000
@@ -1366,7 +1418,9 @@ class DraftGenerationPipeline:
         level = str(info.get("level") or "")
         job_id = str(info.get("job_id") or "")
         draft_id = str(info.get("draft_id") or "")
-        label = f"stage={stage} heading={heading} level={level} job_id={job_id} draft_id={draft_id}"
+        provider = str(self._active_llm.get("provider") if hasattr(self, "_active_llm") else "") or ""
+        model = str(self._active_llm.get("model") if hasattr(self, "_active_llm") else "") or ""
+        label = f"stage={stage} heading={heading} level={level} job_id={job_id} draft_id={draft_id} provider={provider} model={model}"
 
         if messages:
             rendered_messages = []
@@ -1385,9 +1439,8 @@ class DraftGenerationPipeline:
             preview = text_blob
             truncated = False
 
-        # Use WARNING to ensure visibility in Cloud Run logs; fall back to print if logger fails.
         try:
-            logger.warning("PromptSnapshot %s truncated=%s preview=\n%s", label, truncated, preview)
+            logger.log(severity, "PromptSnapshot %s truncated=%s preview=\n%s", label, truncated, preview)
         except Exception:
             print(f"PromptSnapshot {label} truncated={truncated} preview=\n{preview}")
 
@@ -1427,6 +1480,36 @@ class DraftGenerationPipeline:
 
         return faq_items
 
+    def _attempt_json_fix(self, raw_text: str, context: PipelineContext) -> Dict[str, Any]:
+        """Try to repair invalid JSON by asking the LLM to emit valid RFC8259 JSON."""
+        if not raw_text:
+            return {}
+        repair_prompt = (
+            "次の文字列を、RFC8259に準拠したJSONオブジェクト1つに修正してください。"
+            "期待するキー: main_conclusion, supporting_points(array), evidence_needed(array), differentiation_angle。"
+            "修正できない場合は {} のみ返してください。\n\n"
+            f"文字列:\n{raw_text}"
+        )
+        try:
+            result = self._generate_grounded_content(
+                repair_prompt,
+                temperature=0.0,
+                max_tokens=600,
+                log_info={
+                    "stage": "conclusion_fix",
+                    "job_id": context.job_id,
+                    "draft_id": context.draft_id,
+                },
+            )
+            fixed_text = str(result.get("text") or "").strip()
+            normalized = self._strip_json_fence(fixed_text)
+            parsed = json.loads(normalized)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception as exc:
+            logger.warning("Job %s: JSON repair failed (%s)", context.job_id, exc)
+        return {}
+
     def extract_conclusion(self, context: PipelineContext) -> Dict[str, Any]:
         logger.info("Deriving conclusion for job %s", context.job_id)
         keyword_surface = self._sanitize_keyword_surface(context.primary_keyword)
@@ -1455,7 +1538,8 @@ class DraftGenerationPipeline:
         }
         prompt = (
             "以下の情報を読み、検索ユーザーの疑問を最も解消する結論を整理してください。"
-            "必ず JSON 形式のみで出力し、余計な文章は書かないでください。\n\n"
+            "出力は RFC8259 に準拠した JSON オブジェクト1つのみとし、前後に説明文や ```json などは一切付けないでください。"
+            "パースできないと判断した場合は空のオブジェクト {} のみを返してください。\n\n"
             "期待するJSON構造:\n"
             "{\n"
             '  "main_conclusion": "検索意図に対する結論",\n'
@@ -1479,7 +1563,7 @@ class DraftGenerationPipeline:
         try:
             result = self._generate_grounded_content(
                 prompt,
-                temperature=0.35,
+                temperature=0.0,
                 max_tokens=900,
                 log_info={
                     "stage": "conclusion",
@@ -1494,6 +1578,10 @@ class DraftGenerationPipeline:
                 result_payload = parsed
         except Exception as exc:
             logger.warning("Job %s: extract_conclusion failed (%s)", context.job_id, exc)
+            # Try a lightweight JSON repair pass before giving up.
+            fixed_payload = self._attempt_json_fix(raw_text if "raw_text" in locals() else "", context)
+            if fixed_payload:
+                result_payload = fixed_payload
 
         default_conclusion = {
             "main_conclusion": (
@@ -2292,6 +2380,7 @@ class DraftGenerationPipeline:
         logger.info("Job %s: draft refinement took %.2f seconds", job_id, time.time() - step_start)
         style_diagnostics = self._maybe_apply_style_rewrite(draft, context)
         markdown_snapshot = self._render_markdown_snapshot(draft, outline, context)
+        markdown_snapshot = self._normalize_markdown_structure(markdown_snapshot)
         structure_warnings = self._collect_structure_warnings(markdown_snapshot)
         style_diagnostics["validation_warnings"] = structure_warnings
         editor_checklist = self._generate_editor_checklist(structure_warnings)
