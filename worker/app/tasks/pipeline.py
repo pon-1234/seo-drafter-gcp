@@ -1093,11 +1093,53 @@ class DraftGenerationPipeline:
         developer_message = developer_template.format_map(format_payload) if developer_template else ""
         user_message = user_template.format_map(format_payload) if user_template else ""
 
+        if self._is_b2b_context(context):
+            b2b_style_note = (
+                "スタイル注意事項:\n"
+                "- 例や事例は最低7割以上をB2B（SaaS、製造業、BtoBサービスなど）から選ぶ\n"
+                "- B2C例を出す場合もB2Bに置き換えやすい形で説明する\n"
+                "- B2B購買の特徴（複数関与者・長期検討）に随所で触れ、B2C単体の例に終始しない"
+            )
+            user_message = "\n".join(filter(None, [user_message, b2b_style_note]))
+            developer_message = "\n".join(filter(None, [developer_message, "B2Bを前提とする場合は上記スタイル注意事項を必ず反映する。"]))
+            system_message = "\n".join(
+                filter(None, [
+                    system_message,
+                    "読者がB2Bマーケターの場合、B2Cの例だけに偏らず、B2B購買プロセスの前提（複数関与者・長期検討）も明示してください。",
+                ])
+            )
+
         return [
             {"role": "system", "content": system_message},
             {"role": "developer", "content": developer_message},
             {"role": "user", "content": user_message},
         ]
+
+    @staticmethod
+    def _contains_b2b_marker(value: Any) -> bool:
+        if value is None:
+            return False
+        text = str(value).lower()
+        if not text:
+            return False
+        markers = ["b2b", "bto b", "bto-b", "to b", "法人", "企業", "事業者", "saas", "製造"]
+        return any(marker in text for marker in markers)
+
+    def _is_b2b_context(self, context: PipelineContext) -> bool:
+        persona = context.persona or {}
+        writer_persona = context.writer_persona if isinstance(context.writer_persona, dict) else {}
+        candidates = [
+            context.article_type,
+            context.primary_keyword,
+            persona.get("role"),
+            persona.get("job_role"),
+            persona.get("industry"),
+            persona.get("segment"),
+            persona.get("name"),
+            writer_persona.get("role"),
+            writer_persona.get("audience"),
+        ]
+        return any(self._contains_b2b_marker(value) for value in candidates)
 
     @staticmethod
     def _merge_prompt_layers(base_layers: Dict[str, str], expertise_layers: Dict[str, str]) -> Dict[str, str]:
@@ -1129,7 +1171,8 @@ class DraftGenerationPipeline:
             "【分量と具体性】各H2は600〜800字を目安にし、必ず日本の読者がイメージしやすい具体例・ミニ事例を1つ以上入れる。"
             "専門用語は初出で一文説明し、箇条書きは前後に説明文を置いて唐突に始めない。B2B SaaSの話は「一例」として扱い、全体の説明を優先する。\n"
             "【ツール名の扱い】GA4 / Consent Mode / P-Max などは代表例として触れるだけ。設定手順や細かな機能列挙には踏み込まない。\n"
-            "【差別化】渡されたSERPスナップ/差別化トピックを1〜2個本文に織り込み、他社が薄い切り口を補強する。"
+            "【差別化】渡されたSERPスナップ/差別化トピックを1〜2個本文に織り込み、他社が薄い切り口を補強する。\n"
+            "テンプレ名（QUEST/PREP/FAB/PAS等）や「Q/U:」「E/S:」「T:」「リード文：」のような内部ラベルは、見出し・本文に一切表示しない。"
         )
         additions_user = (
             "このセクションでは「◯◯とは」記事らしく、全体像を俯瞰してから必要な部分だけを深掘りしてください。"
@@ -1323,6 +1366,9 @@ class DraftGenerationPipeline:
                         first_h1_seen = True
                 # Remove template labels like Q/U:, E/S:, T:
                 text = re.sub(r"^(Q/U:|E/S:|T:)\s*", "", text)
+                text = re.sub(r"^リード文[:：]\s*", "", text)
+                text = re.sub(r"\b(QUEST|PREP|FAB|PAS)\b[:：]?\s*", "", text, flags=re.IGNORECASE)
+                text = re.sub(r"\s{2,}", " ", text).strip()
                 stripped = f"{hashes} {text}".strip()
             normalized.append(stripped)
 
@@ -1534,6 +1580,7 @@ class DraftGenerationPipeline:
             "pain_points": persona.get("pain_points", [])[:3],
             "job_to_be_done": persona.get("job_to_be_done"),
         }
+        persona_label = infer_japanese_persona_label(context.persona, context.writer_persona)
         payload = {
             "primary_keyword": context.primary_keyword,
             "intent": context.intent,
@@ -1548,11 +1595,13 @@ class DraftGenerationPipeline:
             "パースできないと判断した場合は空のオブジェクト {} のみを返してください。\n\n"
             "期待するJSON構造:\n"
             "{\n"
-            '  "main_conclusion": "検索意図に対する結論",\n'
-            '  "supporting_points": ["結論を支える理由", "..."],\n'
-            '  "evidence_needed": ["主張を裏付けるデータや事例", "..."],\n'
+            '  "definition": "◯◯とは何かを一文で定義",\n'
+            '  "why_now": ["重要性が増している理由を3〜4点", "..."],\n'
+            '  "success_keys": ["成功に欠かせない要素を3〜4点", "..."],\n'
+            '  "target_reader": "想定読者を一言で（例：B2Bマーケ担当1年目）",\n'
             '  "differentiation_angle": "競合記事との差別化視点"\n'
             "}\n\n"
+            "最初のH2で示す結論は definition と success_keys を組み合わせ、一文でタイトルと噛み合う形にしてください。\n\n"
             f"入力データ:\n{json.dumps(payload, ensure_ascii=False)}"
         )
         result_payload: Dict[str, Any] = {}
@@ -1589,41 +1638,56 @@ class DraftGenerationPipeline:
             if fixed_payload:
                 result_payload = fixed_payload
 
-        default_conclusion = {
-            "main_conclusion": (
-                result_payload.get("main_conclusion")
-                or f"{keyword_surface}で成果を出すには、読者のゴールに直結する実務的な優先順位を示すことが不可欠です。"
-            ),
-            "supporting_points": [],
-            "evidence_needed": [],
-            "differentiation_angle": result_payload.get("differentiation_angle") or "",
-        }
+        definition = str(result_payload.get("definition") or "").strip()
+        if not definition:
+            definition = f"{keyword_surface}とは、デジタルチャネルを使って顧客との接点を構築・最適化し成果を高める取り組みの総称です。"
 
-        supporting_points = result_payload.get("supporting_points")
-        if isinstance(supporting_points, list) and supporting_points:
-            default_conclusion["supporting_points"] = [
-                str(point).strip() for point in supporting_points if str(point).strip()
-            ]
-        else:
-            fallback_points = context.serp_gap_topics[:3] or ["最新データと実例で根拠を提示", "施策の優先順位を明示", "失敗パターンと回避策をセットで提示"]
-            default_conclusion["supporting_points"] = fallback_points
+        def _sanitize_list(items: Any) -> List[str]:
+            if not isinstance(items, list):
+                return []
+            return [str(item).strip() for item in items if str(item).strip()]
 
-        evidence = result_payload.get("evidence_needed")
-        if isinstance(evidence, list) and evidence:
-            default_conclusion["evidence_needed"] = [
-                str(item).strip() for item in evidence if str(item).strip()
-            ]
-        else:
-            default_conclusion["evidence_needed"] = [
+        why_now = _sanitize_list(result_payload.get("why_now"))
+        if not why_now:
+            why_now = ["顧客行動のデジタル化", "効果測定の高度化", "競合のオンライン強化"]
+
+        success_keys = _sanitize_list(result_payload.get("success_keys"))
+        if not success_keys:
+            success_keys = ["KPI設計と計測体制", "優先チャネルの選択", "継続的な改善サイクル"]
+
+        target_reader = str(result_payload.get("target_reader") or persona_label or "").strip() or "B2Bマーケ担当1年目"
+        differentiation_angle = str(result_payload.get("differentiation_angle") or "").strip() or "SERP上位が触れていない実務課題に寄り添う"
+
+        success_summary = "・".join(success_keys[:3])
+        main_conclusion = f"{definition}。成功の鍵は{success_summary}に集約されます。" if success_summary else definition
+
+        supporting_points: List[str] = []
+        if success_keys:
+            supporting_points.extend(success_keys[:4])
+        if not supporting_points:
+            supporting_points = why_now[:3] or context.serp_gap_topics[:3]
+
+        evidence_needed_raw = result_payload.get("evidence_needed")
+        evidence_needed = _sanitize_list(evidence_needed_raw)
+        if not evidence_needed:
+            evidence_needed = [
                 "最新の統計データ（国内/業界別）",
                 "成功/失敗事例の比較",
             ]
 
-        if not default_conclusion["differentiation_angle"]:
-            default_conclusion["differentiation_angle"] = "SERP上位が触れていない読者の実務課題に寄り添う"
+        conclusion_payload = {
+            "definition": definition,
+            "why_now": why_now,
+            "success_keys": success_keys,
+            "target_reader": target_reader,
+            "differentiation_angle": differentiation_angle,
+            "main_conclusion": main_conclusion,
+            "supporting_points": supporting_points,
+            "evidence_needed": evidence_needed,
+        }
 
-        logger.info("Job %s: main conclusion resolved to %s", context.job_id, default_conclusion["main_conclusion"])
-        return default_conclusion
+        logger.info("Job %s: main conclusion resolved to %s", context.job_id, main_conclusion)
+        return conclusion_payload
 
     def refine_draft(
         self,
@@ -1670,8 +1734,19 @@ class DraftGenerationPipeline:
         }
         prompt_json = json.dumps(prompt_payload, ensure_ascii=False)
         conclusion_clause = ""
-        if conclusion and conclusion.get("main_conclusion"):
-            conclusion_clause = f"\n- 以下の結論を軸に一貫性を保つこと: {conclusion['main_conclusion']}"
+        if conclusion:
+            success_keys = []
+            if isinstance(conclusion.get("success_keys"), list):
+                success_keys = [str(item).strip() for item in conclusion["success_keys"] if str(item).strip()]
+            conclusion_fragments = []
+            if conclusion.get("main_conclusion"):
+                conclusion_fragments.append(f"結論: {conclusion['main_conclusion']}")
+            if conclusion.get("definition"):
+                conclusion_fragments.append(f"定義: {conclusion['definition']}")
+            if success_keys:
+                conclusion_fragments.append(f"成功要素: {', '.join(success_keys[:3])}")
+            if conclusion_fragments:
+                conclusion_clause = "\n- 以下の結論を軸に一貫性を保つこと: " + " / ".join(conclusion_fragments)
         instruction = (
             "あなたはシニアSEO編集長です。以下のJSONで渡すドラフトを推敲し、"
             "論理構成・重複・専門用語・結論との整合性を整えてください。\n\n"
@@ -1689,9 +1764,13 @@ class DraftGenerationPipeline:
             "- 各 paragraph は具体的で重複のない文章にする\n"
             "- FAQ/claims は要点のみ残し、不要な重複は削除\n"
             "- refinement_notes にはユーザーが後から理解できる粒度で修正理由を列挙\n\n"
-            "- 見出しや本文に含まれるテンプレートのラベル（例:「リード文：」「Q/U:」「E/S:」「QUESTで提示」など）は削除または自然な文章に置き換える\n"
-            "- Markdownの見出しレベルはH1をタイトルのみに1回だけ使用し、本文中はH2/H3のみを用いる。複数のH1があれば適切にH2/H3へ下げる\n"
-            "- 同じ内容を繰り返す段落は統合・削除し、各セクションが指定レンジに収まるよう過剰な部分は簡潔に要約する\n\n"
+            "- 見出しや本文に含まれるテンプレートのラベル（例:「リード文：」「Q/U:」「E/S:」「T:」「QUESTで提示」など）やフレームワーク名（QUEST/PREP/FAB/PAS等）は削除または自然な文章に置き換える\n"
+            "- Markdownの見出しレベルはH1をタイトルのみに1回だけ使用し、本文中はH2/H3のみを用いる。複数のH1があれば適切にH2/H3へ下げる。H2タイトルが重複する場合は内容が分かるよう具体的に書き換えてユニークにする\n"
+            "- 同じ内容を繰り返す段落は統合・削除し、各セクションが指定レンジに収まるよう過剰な部分は簡潔に要約する\n"
+            "- 「◯◯とは〜」のような定義文が複数回出る場合は、冒頭の定義だけ残し、以降は「この取り組み」「デジタル施策」などに言い換えて重複を避ける\n"
+            "- B2Cの例を挙げた場合はすぐ後に「B2Bでは〜」と1文で橋渡しを入れ、事例の7割以上をB2B（SaaS/製造業/法人向けサービス等）から選ぶ\n"
+            "- 1文に読点が3つ以上あるなど長すぎる場合は意味の切れ目で2〜3文に分割し、専門用語は初出のみ簡単な言い換え＋例を添える\n"
+            "- 数値は公的機関や一次情報を優先し、不確かなものは「約」「〜程度」にとどめる。1セクションあたりの数値は1〜3個に抑え、変更した場合は理由をnotesに記載\n\n"
             f"{conclusion_clause}\n"
             "=== 元ドラフト(JSON) ===\n"
             f"{prompt_json}\n"
@@ -1865,11 +1944,19 @@ class DraftGenerationPipeline:
         bullet_points = "\n".join(f"- {point}" for point in key_points if point)
         conclusion_line = ""
         support_clause = ""
-        if conclusion and conclusion.get("main_conclusion"):
-            conclusion_line = f"最終結論: {conclusion['main_conclusion']}\n"
-            supporting_points = [
-                str(point).strip() for point in conclusion.get("supporting_points", []) if str(point).strip()
-            ]
+        if conclusion:
+            main_text = conclusion.get("main_conclusion") or conclusion.get("definition")
+            if main_text:
+                conclusion_line = f"最終結論: {main_text}\n"
+            supporting_points = []
+            if isinstance(conclusion.get("success_keys"), list):
+                supporting_points = [
+                    str(point).strip() for point in conclusion["success_keys"] if str(point).strip()
+                ]
+            if not supporting_points and isinstance(conclusion.get("supporting_points"), list):
+                supporting_points = [
+                    str(point).strip() for point in conclusion.get("supporting_points", []) if str(point).strip()
+                ]
             if supporting_points:
                 support_clause = "結論を支える要素:\n" + "\n".join(f"- {point}" for point in supporting_points[:3]) + "\n"
         prompt = (
