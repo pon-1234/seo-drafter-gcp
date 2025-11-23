@@ -288,15 +288,25 @@ class DraftGenerationPipeline:
         return f"{keyword_surface}の実務ガイド: 結論と成功プロセス"
 
     @staticmethod
-    def _shorten_conclusion_heading(main_conclusion: str, keyword_surface: str) -> str:
+    def _shorten_conclusion_heading(
+        main_conclusion: str,
+        keyword_surface: str,
+        *,
+        success_keys: Optional[List[str]] = None,
+    ) -> str:
         """Build a concise H2 heading for the conclusion section."""
         import re
 
+        if success_keys:
+            count = min(len(success_keys), 3)
+            if count >= 3:
+                return f"結論：{keyword_surface}成功の3つのポイント"
+            return f"結論：{keyword_surface}成功のポイント"
         if not main_conclusion:
             return f"結論：{keyword_surface}のポイント"
         head = re.split(r"[。]", main_conclusion, 1)[0].strip()
-        if len(head) > 40:
-            head = head[:40] + "…"
+        if len(head) > 32:
+            head = head[:32] + "…"
         return f"結論：{head or keyword_surface}"
 
     def _apply_conclusion_to_outline(
@@ -317,14 +327,23 @@ class DraftGenerationPipeline:
         if context.heading_mode != "manual":
             first_heading = str(sections[0].get("text") or "").strip()
             if "結論" not in first_heading and "まとめ" not in first_heading:
-                supporting_points = [
+                success_keys = [
+                    str(point).strip()
+                    for point in conclusion.get("success_keys", [])[:4]
+                    if str(point).strip()
+                ]
+                supporting_points = success_keys or [
                     str(point).strip()
                     for point in conclusion.get("supporting_points", [])[:3]
                     if str(point).strip()
                 ]
                 first_section_words = sections[0].get("estimated_words") or 260
                 keyword_surface = self._sanitize_keyword_surface(context.primary_keyword)
-                heading_text = self._shorten_conclusion_heading(main_conclusion, keyword_surface)
+                heading_text = self._shorten_conclusion_heading(
+                    main_conclusion,
+                    keyword_surface,
+                    success_keys=success_keys,
+                )
                 outline["h2"] = [
                     {
                         "text": heading_text,
