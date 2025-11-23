@@ -287,6 +287,18 @@ class DraftGenerationPipeline:
 
         return f"{keyword_surface}の実務ガイド: 結論と成功プロセス"
 
+    @staticmethod
+    def _shorten_conclusion_heading(main_conclusion: str, keyword_surface: str) -> str:
+        """Build a concise H2 heading for the conclusion section."""
+        import re
+
+        if not main_conclusion:
+            return f"結論：{keyword_surface}のポイント"
+        head = re.split(r"[。]", main_conclusion, 1)[0].strip()
+        if len(head) > 40:
+            head = head[:40] + "…"
+        return f"結論：{head or keyword_surface}"
+
     def _apply_conclusion_to_outline(
         self,
         outline: Dict,
@@ -311,9 +323,12 @@ class DraftGenerationPipeline:
                     if str(point).strip()
                 ]
                 first_section_words = sections[0].get("estimated_words") or 260
+                keyword_surface = self._sanitize_keyword_surface(context.primary_keyword)
+                heading_text = self._shorten_conclusion_heading(main_conclusion, keyword_surface)
                 outline["h2"] = [
                     {
-                        "text": f"結論：{main_conclusion}",
+                        "text": heading_text,
+                        "summary_hint": main_conclusion,
                         "purpose": "Conclusion",
                         "estimated_words": first_section_words,
                         "h3": [
@@ -933,6 +948,8 @@ class DraftGenerationPipeline:
             raw_text = grounded_result.get("text")
             normalized_text = raw_text.strip() if isinstance(raw_text, str) else ""
             paragraph_text = normalized_text or f"{heading_text} について解説します。"
+            paragraph_text = self._strip_leading_heading(paragraph_text, heading_text)
+            paragraph_text = self._strip_markdown_hash_headings(paragraph_text)
 
             paragraph_payload = {
                 "heading": heading_text,
@@ -1397,6 +1414,56 @@ class DraftGenerationPipeline:
         cleaned = re.sub(r"\s{2,}", " ", cleaned)
         return cleaned.strip()
 
+    @staticmethod
+    def _strip_leading_heading(text: str, heading: str) -> str:
+        """Remove duplicated heading text from the start of a paragraph."""
+        if not text:
+            return text
+        import re
+
+        t = text.lstrip()
+        patterns = [
+            rf"^#+\s*{re.escape(heading)}\s*",
+            rf"^{re.escape(heading)}\s*[:：]?\s*",
+        ]
+        for pat in patterns:
+            if re.match(pat, t):
+                t = re.sub(pat, "", t).lstrip()
+                break
+        return t
+
+    @staticmethod
+    def _strip_markdown_hash_headings(text: str) -> str:
+        """Demote in-paragraph Markdown headings to plain text."""
+        if not text:
+            return text
+        import re
+
+        lines = text.splitlines()
+        cleaned_lines = []
+        for line in lines:
+            if re.match(r"^\s*#{2,6}\s+\S+", line):
+                cleaned_lines.append(re.sub(r"^\s*#{2,6}\s+", "", line, 1))
+            else:
+                cleaned_lines.append(line)
+        return "\n".join(cleaned_lines)
+
+    @staticmethod
+    def _trim_paragraph_for_refine(text: str, limit: int = 700) -> str:
+        """Trim paragraph content for refine prompt while preserving sentence boundaries."""
+        if not text or len(text) <= limit:
+            return text
+        import re
+
+        trimmed = ""
+        for sentence in re.split(r"(?<=[。．？?！!])|\n", text):
+            if not sentence:
+                continue
+            if len(trimmed) + len(sentence) > limit:
+                break
+            trimmed += sentence
+        return trimmed or text[:limit]
+
     def _strip_template_labels_in_draft(self, draft: Dict) -> Dict:
         """Apply heading label stripping to draft sections to keep UI output clean."""
         if not isinstance(draft, dict):
@@ -1749,7 +1816,7 @@ class DraftGenerationPipeline:
             for paragraph in section.get("paragraphs", [])[:3]:
                 text = str(paragraph.get("text") or "").strip()
                 if text:
-                    trimmed_paragraphs.append(text[:500])
+                    trimmed_paragraphs.append(self._trim_paragraph_for_refine(text, limit=700))
             trimmed_sections.append({"heading": heading, "paragraphs": trimmed_paragraphs})
 
         prompt_payload = {
