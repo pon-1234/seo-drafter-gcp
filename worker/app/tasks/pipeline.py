@@ -59,6 +59,7 @@ class PipelineContext:
     serp_gap_topics: List[str]
     expertise_level: str  # "beginner" | "intermediate" | "expert"
     tone: str  # "casual" | "formal"
+    keyword_preset: Optional[str] = None  # e.g., "glossary" for 「◯◯とは」 intent
 
 
 class DraftGenerationPipeline:
@@ -158,6 +159,8 @@ class DraftGenerationPipeline:
                 key_points = [str(item).strip() for item in raw_points if str(item).strip()]
             else:
                 key_points = []
+            if url and "example.com" in url:
+                continue
             results.append({
                 "url": url,
                 "title": title,
@@ -263,14 +266,24 @@ class DraftGenerationPipeline:
         keyword_surface = self._sanitize_keyword_surface(keyword)
         article_type = context.article_type if context else "information"
         expertise = context.expertise_level if context else "intermediate"
+        is_glossary = (
+            (context and context.keyword_preset == "glossary")
+            or self._is_glossary_keyword(primary_keyword, article_type)
+        )
+        glossary_phrase = f"{keyword_surface}とは" if is_glossary else keyword_surface
 
         if expertise == "beginner":
             if article_type == "comparison":
                 return f"{keyword_surface}の選び方ガイド：初心者向けおすすめと優先順位"
-            return f"{keyword_surface}とは？初心者向けに基礎から実践まで解説"
+            if is_glossary:
+                return f"{glossary_phrase}？基本の考え方と実務での活かし方"
+            return f"{keyword_surface}の入門ガイド：基礎から実践まで解説"
 
         if article_type == "comparison":
             return f"{keyword_surface}の比較ガイド: 選び方と優先順位"
+
+        if is_glossary and article_type == "information":
+            return f"{glossary_phrase}？基本と成功プロセスを整理"
 
         return f"{keyword_surface}の実務ガイド: 結論と成功プロセス"
 
@@ -327,6 +340,37 @@ class DraftGenerationPipeline:
             fallback = re.sub(r"(?:とは|[?？])+", "", raw_value).strip()
             return fallback or "SEO"
         return cleaned
+
+    @staticmethod
+    def _is_glossary_keyword(keyword: str, article_type: str) -> bool:
+        """Detect \"◯◯とは\"/glossary-like queries."""
+        if article_type != "information":
+            return False
+        normalized = str(keyword or "").strip()
+        return bool(re.search(r"とは[?？]*$", normalized))
+
+    def _infer_keyword_preset(self, primary_keyword: str, article_type: str) -> Optional[str]:
+        """Return a preset label based on keyword form."""
+        if self._is_glossary_keyword(primary_keyword, article_type):
+            return "glossary"
+        return None
+
+    @staticmethod
+    def _coerce_expertise_level_for_preset(requested: str, preset: Optional[str]) -> str:
+        """Balance expertise level for certain presets."""
+        if preset == "glossary" and requested == "intermediate":
+            return "beginner"
+        return requested
+
+    @staticmethod
+    def _coerce_word_count_for_preset(word_count_raw: Any, preset: Optional[str]) -> Optional[str]:
+        """Provide preset defaults when user has not specified a range."""
+        if word_count_raw:
+            return str(word_count_raw)
+        if preset == "glossary":
+            # 6セクション × 600〜800字を目安にしたレンジ
+            return "3600-4800"
+        return None
 
     @staticmethod
     def _extract_title_line(raw_text: str) -> str:
@@ -402,13 +446,19 @@ class DraftGenerationPipeline:
 
     def _outline_from_template(self, context: PipelineContext, prompt: Dict) -> Dict:
         keyword = prompt["primary_keyword"]
-        template_sections = self._article_type_template(context.article_type, keyword, context.expertise_level)
+        template_sections = self._article_type_template(
+            context.article_type,
+            keyword,
+            context.expertise_level,
+            context.keyword_preset,
+        )
         budget = self._estimate_section_word_budget(context, len(template_sections) or 1)
         for section in template_sections:
             section.setdefault("estimated_words", budget)
             for h3 in section.get("h3", []):
                 h3.setdefault("estimated_words", max(int(budget / max(len(section.get("h3", [])) or 1, 1)), 120))
-        for gap_topic in context.serp_gap_topics[:5]:
+        max_gap_topics = 2 if context.keyword_preset == "glossary" else 5
+        for gap_topic in context.serp_gap_topics[:max_gap_topics]:
             template_sections.append(
                 {
                     "text": f"{gap_topic}の差別化と未カバー情報",
@@ -427,72 +477,81 @@ class DraftGenerationPipeline:
             "h2": template_sections,
         }
 
-    def _article_type_template(self, article_type: str, keyword: str, expertise_level: str = "intermediate") -> List[Dict[str, Any]]:
+    def _article_type_template(
+        self,
+        article_type: str,
+        keyword: str,
+        expertise_level: str = "intermediate",
+        keyword_preset: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         # Beginner-friendly templates (optimized for "◯◯とは" search intent)
         keyword_surface = self._sanitize_keyword_surface(keyword)
         beginner_information_template = [
             {
-                "text": "30秒でわかる結論（まずやるべき3つ）",
-                "purpose": "Summary",
+                "text": f"リード文：{keyword_surface}とは何かをQUESTで提示（定義を冒頭に置く）",
+                "purpose": "Lead",
                 "h3": [
-                    {"text": "結論のサマリ", "purpose": "Summary"},
-                    {"text": "おすすめ施策TOP3（表）", "purpose": "SummaryTable"},
+                    {"text": "Q/U: 読者の悩みと放置するリスク", "purpose": "LeadQuest"},
+                    {"text": f"E/S: {keyword_surface}で得られる価値と記事構成", "purpose": "LeadQuest"},
+                    {"text": "T: 読後に実践できる一歩を示す", "purpose": "LeadQuest"},
                 ],
             },
             {
-                "text": f"{keyword_surface}とは？基礎と全体像",
+                "text": f"{keyword_surface}とは何か（定義と従来マーケとの違い）",
                 "purpose": "Definition",
                 "h3": [
-                    {"text": f"{keyword_surface}の定義と役割をやさしく解説", "purpose": "Definition"},
-                    {"text": "関連するWebマーケティングとの違い", "purpose": "Difference"},
-                    {"text": "いま注目される背景データ", "purpose": "Importance"},
+                    {"text": f"{keyword_surface}の定義を一文で明示", "purpose": "Definition"},
+                    {"text": "従来マーケとの違いと役割分担", "purpose": "Difference"},
+                    {"text": "向いているケース・向かないケース", "purpose": "FitUnfit"},
                 ],
             },
             {
-                "text": "施策選定で失敗しない3つのポイント",
-                "purpose": "Selection",
+                "text": f"いま{keyword_surface}が重要になっている背景",
+                "purpose": "Context",
                 "h3": [
-                    {"text": "ポイント1：目標と予算を数値で決める", "purpose": "GoalBudget"},
-                    {"text": "ポイント2：社内リソースと運用体制を把握", "purpose": "Resources"},
-                    {"text": "ポイント3：KPIと効果測定の方法を整える", "purpose": "Measurement"},
+                    {"text": "市場環境や顧客行動の変化", "purpose": "MarketShift"},
+                    {"text": "法規制・技術トレンド（Cookie/個人情報保護など）", "purpose": "Regulation"},
+                    {"text": "オフライン施策との役割分担", "purpose": "OfflineRole"},
                 ],
             },
             {
-                "text": f"{keyword_surface}の主要手法5つを比較",
-                "purpose": "Methods",
+                "text": "主な施策・チャネルの種類と役割",
+                "purpose": "Channels",
                 "h3": [
-                    {"text": "主要施策の比較表（目的・費用・スピード）", "purpose": "MethodsTable"},
-                    {"text": "初心者におすすめの組み合わせ方", "purpose": "UseCases"},
+                    {"text": "自社サイト/SEO/コンテンツマーケの基礎", "purpose": "OwnedSeo"},
+                    {"text": "広告・SNSでの集客と向き不向き", "purpose": "AdsSNS"},
+                    {"text": "メール/MA/ウェビナーなど育成施策", "purpose": "Nurture"},
                 ],
             },
             {
-                "text": "主要ツールと導入の考え方",
-                "purpose": "Tools",
+                "text": "成功させるためのポイント・KPI設計",
+                "purpose": "KPI",
                 "h3": [
-                    {"text": "Googleアナリティクス4で現状把握", "purpose": "GA4"},
-                    {"text": "Google広告で集客を加速する", "purpose": "Ads"},
-                    {"text": "SNS・MAツールなど他チャネルの活用", "purpose": "OtherTools"},
+                    {"text": "ファネル別のKPIと計測の考え方", "purpose": "FunnelKPI"},
+                    {"text": "組織・体制づくりとリソース配分", "purpose": "Org"},
+                    {"text": "ツール活用は代表例のみ挙げ、設定手順は避ける", "purpose": "ToolsLight"},
                 ],
             },
             {
-                "text": "企業規模・担当者タイプ別の施策優先度",
-                "purpose": "Segmentation",
+                "text": "よくある失敗パターンと対策",
+                "purpose": "Risk",
                 "h3": [
-                    {"text": "小規模事業者がまず整えること", "purpose": "SmallBusiness"},
-                    {"text": "中規模企業の体制づくり", "purpose": "MidMarket"},
-                    {"text": "大企業での全社展開ポイント", "purpose": "Enterprise"},
+                    {"text": "チャネルごとの部分最適・計測偏重になりがち", "purpose": "ChannelSilod"},
+                    {"text": "ターゲット/メッセージのずれ", "purpose": "MessageMismatch"},
+                    {"text": "短期で判断しすぎる/データの読み違い", "purpose": "ShortTerm"},
                 ],
             },
             {
-                "text": f"まとめ：{keyword_surface}の次のステップとチェックリスト",
+                "text": f"まとめと今日から取れる一歩（{keyword_surface}の活かし方）",
                 "purpose": "Close",
                 "h3": [
-                    {"text": "失敗しないためのチェックリスト", "purpose": "Checklist"},
-                    {"text": "今日からできるアクション", "purpose": "Action"},
+                    {"text": "主要ポイントの振り返り", "purpose": "Recap"},
+                    {"text": "すぐに試せる1アクションとCTA", "purpose": "Action"},
                 ],
             },
         ]
 
+        glossary_information_template = beginner_information_template
         beginner_comparison_template = [
             {
                 "text": "30秒で要点：この記事で分かること",
@@ -783,9 +842,11 @@ class DraftGenerationPipeline:
         ]
 
         # Select templates based on expertise level
+        information_template_to_use = beginner_information_template
         if expertise_level == "beginner":
+            information_template_to_use = glossary_information_template if keyword_preset == "glossary" else beginner_information_template
             templates = {
-                "information": beginner_information_template,
+                "information": information_template_to_use,
                 "comparison": beginner_comparison_template,
                 "ranking": beginner_ranking_template,
                 "closing": beginner_information_template,  # Use information template for closing
@@ -798,9 +859,13 @@ class DraftGenerationPipeline:
                 "ranking": ranking_template,
                 "closing": closing_template,
             }
+            information_template_to_use = information_template
+        default_information_template = (
+            information_template if expertise_level != "beginner" else information_template_to_use
+        )
 
         resolved = []
-        for section in templates.get(article_type, information_template if expertise_level != "beginner" else beginner_information_template):
+        for section in templates.get(article_type, default_information_template):
             resolved.append(
                 {
                     "text": section["text"],
@@ -834,6 +899,13 @@ class DraftGenerationPipeline:
             grounded_result = self._generate_grounded_content(
                 messages=messages,
                 temperature=context.llm_temperature,
+                log_info={
+                    "stage": "generate_draft",
+                    "heading": heading_text,
+                    "level": level,
+                    "job_id": context.job_id,
+                    "draft_id": context.draft_id,
+                },
             )
             claim_id = f"{context.draft_id}-{heading_text}"
             if level == "h2":
@@ -920,7 +992,7 @@ class DraftGenerationPipeline:
 
     def _build_prompt_messages(self, heading: str, level: str, context: PipelineContext) -> List[Dict[str, str]]:
         """Build layered prompt messages (system/developer/user)."""
-        # Select prompt layers based on expertise level
+        # Select prompt layers based on expertise level and project defaults
         expertise_layers = get_prompt_layers_for_expertise(context.expertise_level)
 
         logger.info(
@@ -930,13 +1002,14 @@ class DraftGenerationPipeline:
             heading
         )
 
-        # Use custom prompt layers if provided, otherwise use expertise-based layers
-        if context.prompt_layers and any(context.prompt_layers.values()):
-            prompt_layers = context.prompt_layers
-            logger.info("Using custom prompt layers from context")
+        base_layers = context.prompt_layers if (context.prompt_layers and any(context.prompt_layers.values())) else {}
+        prompt_layers = expertise_layers.to_payload()
+        if base_layers:
+            prompt_layers = self._merge_prompt_layers(base_layers, prompt_layers)
+            logger.info("Using merged prompt layers (project defaults + expertise)")
         else:
-            prompt_layers = expertise_layers.to_payload()
             logger.info("Using expertise-based prompt layers for level: %s", context.expertise_level)
+        prompt_layers = self._augment_layers_for_preset(prompt_layers, context)
 
         writer = context.writer_persona or {}
         writer_name = writer.get("name") or "シニアSEOライター"
@@ -1011,6 +1084,48 @@ class DraftGenerationPipeline:
         ]
 
     @staticmethod
+    def _merge_prompt_layers(base_layers: Dict[str, str], expertise_layers: Dict[str, str]) -> Dict[str, str]:
+        """Concatenate project-level and expertise-specific prompt layers."""
+        merged: Dict[str, str] = {}
+        for key in ("system", "developer", "user"):
+            parts = []
+            base = base_layers.get(key, "")
+            expert = expertise_layers.get(key, "")
+            if base and base.strip():
+                parts.append(base.strip())
+            if expert and expert.strip():
+                parts.append(expert.strip())
+            merged[key] = "\n\n".join(parts)
+        return merged
+
+    def _augment_layers_for_preset(self, layers: Dict[str, str], context: PipelineContext) -> Dict[str, str]:
+        """Inject preset-specific writing rules (e.g., glossary/「◯◯とは」)."""
+        if context.keyword_preset != "glossary":
+            return layers
+        additions_system = (
+            "この記事は「◯◯とは」クエリ向けの基礎解説です。検索意図は「基礎を理解し、自分の業務にどう関係するかを知りたい」。"
+            "計測・広告の深掘りよりも、チャネル全体像・向き不向き・最初の一歩を優先し、Google固有機能名は代表例として軽く触れるだけにします。"
+        )
+        additions_developer = (
+            "【タイトル/H1】主キーワード「{primary_keyword}」をそのまま含める。\n"
+            "【リード】QUESTで300〜500字。最初の2〜3文で「{primary_keyword}とは〜である」と定義する。\n"
+            "【構成の骨格】リード→「◯◯とは」定義→背景→主な施策/チャネル→成功ポイント・KPI→失敗と対策→まとめ/一歩の順で並べる。\n"
+            "【分量と具体性】各H2は600〜800字を目安にし、必ず日本の読者がイメージしやすい具体例・ミニ事例を1つ以上入れる。"
+            "専門用語は初出で一文説明し、箇条書きは前後に説明文を置いて唐突に始めない。B2B SaaSの話は「一例」として扱い、全体の説明を優先する。\n"
+            "【ツール名の扱い】GA4 / Consent Mode / P-Max などは代表例として触れるだけ。設定手順や細かな機能列挙には踏み込まない。\n"
+            "【差別化】渡されたSERPスナップ/差別化トピックを1〜2個本文に織り込み、他社が薄い切り口を補強する。"
+        )
+        additions_user = (
+            "このセクションでは「◯◯とは」記事らしく、全体像を俯瞰してから必要な部分だけを深掘りしてください。"
+            "計測・広告に偏らず、チャネル比較や読者の最初の一歩を示すことを優先します。"
+        )
+        patched = dict(layers)
+        patched["system"] = "\n\n".join(filter(None, [layers.get("system", ""), additions_system])).strip()
+        patched["developer"] = "\n\n".join(filter(None, [layers.get("developer", ""), additions_developer])).strip()
+        patched["user"] = "\n\n".join(filter(None, [layers.get("user", ""), additions_user])).strip()
+        return patched
+
+    @staticmethod
     def _render_reader_profile(persona: Dict[str, Any], default_tone: str) -> str:
         name = persona.get("name") or "読者"
         goals = " / ".join(persona.get("goals", [])[:3]) or "意思決定に役立つ情報を得たい"
@@ -1033,6 +1148,16 @@ class DraftGenerationPipeline:
                     hits.append(phrase)
                     break
         return hits
+
+    @staticmethod
+    def _count_hits(text: str, keywords: List[str]) -> int:
+        """Count occurrences of keywords in text."""
+        count = 0
+        for keyword in keywords:
+            if not keyword:
+                continue
+            count += len(re.findall(re.escape(keyword), text))
+        return count
 
     @staticmethod
     def _prioritize_sources(sources: List[Dict[str, Any]], preferred_patterns: List[str]) -> List[Dict[str, Any]]:
@@ -1194,8 +1319,10 @@ class DraftGenerationPipeline:
         messages: Optional[List[Dict[str, str]]] = None,
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
+        log_info: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Generate content with the configured OpenAI gateway."""
+        self._log_prompt_snapshot(prompt=prompt, messages=messages, log_info=log_info)
         if not self.ai_gateway:
             logger.error("AI Gateway not available - cannot generate content")
             raise RuntimeError("AI Gateway is not initialized. Please configure OPENAI_API_KEY or GCP credentials.")
@@ -1213,6 +1340,46 @@ class DraftGenerationPipeline:
             logger.error("Content generation failed: %s", e)
             raise
 
+    def _log_prompt_snapshot(
+        self,
+        prompt: Optional[str],
+        messages: Optional[List[Dict[str, str]]],
+        log_info: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Optionally log prompt/messages for traceability (controlled via LOG_PROMPTS)."""
+        if not getattr(self.settings, "log_prompts", False):
+            return
+        try:
+            max_chars = int(getattr(self.settings, "log_prompts_max_chars", 2000) or 0)
+        except Exception:
+            max_chars = 2000
+        info = log_info or {}
+        stage = str(info.get("stage") or "unspecified")
+        heading = str(info.get("heading") or "")
+        level = str(info.get("level") or "")
+        job_id = str(info.get("job_id") or "")
+        draft_id = str(info.get("draft_id") or "")
+        label = f"stage={stage} heading={heading} level={level} job_id={job_id} draft_id={draft_id}"
+
+        if messages:
+            rendered_messages = []
+            for entry in messages:
+                role = str(entry.get("role") or "unknown")
+                content = str(entry.get("content") or "")
+                rendered_messages.append(f"{role}: {content}")
+            text_blob = "\n---\n".join(rendered_messages)
+        else:
+            text_blob = str(prompt or "")
+
+        if max_chars > 0 and len(text_blob) > max_chars:
+            preview = text_blob[:max_chars]
+            truncated = True
+        else:
+            preview = text_blob
+            truncated = False
+
+        logger.info("PromptSnapshot %s truncated=%s preview=\n%s", label, truncated, preview)
+
     def _generate_faq(self, context: PipelineContext) -> List[Dict]:
         """Generate FAQ section using the OpenAI gateway."""
         persona_name = context.persona.get("name", "読者")
@@ -1224,6 +1391,12 @@ class DraftGenerationPipeline:
             result = self._generate_grounded_content(
                 prompt,
                 temperature=context.llm_temperature,
+                log_info={
+                    "stage": "faq",
+                    "heading": f"FAQ: {pain}",
+                    "job_id": context.job_id,
+                    "draft_id": context.draft_id,
+                },
             )
             raw_answer = result.get("text")
             normalized_answer = raw_answer.strip() if isinstance(raw_answer, str) else ""
@@ -1287,6 +1460,11 @@ class DraftGenerationPipeline:
                 prompt,
                 temperature=0.35,
                 max_tokens=900,
+                log_info={
+                    "stage": "conclusion",
+                    "job_id": context.job_id,
+                    "draft_id": context.draft_id,
+                },
             )
             raw_text = str(result.get("text") or "").strip()
             normalized = self._strip_json_fence(raw_text)
@@ -1396,6 +1574,9 @@ class DraftGenerationPipeline:
             "- 各 paragraph は具体的で重複のない文章にする\n"
             "- FAQ/claims は要点のみ残し、不要な重複は削除\n"
             "- refinement_notes にはユーザーが後から理解できる粒度で修正理由を列挙\n\n"
+            "- 見出しや本文に含まれるテンプレートのラベル（例:「リード文：」「Q/U:」「E/S:」「QUESTで提示」など）は削除または自然な文章に置き換える\n"
+            "- Markdownの見出しレベルはH1をタイトルのみに1回だけ使用し、本文中はH2/H3のみを用いる。複数のH1があれば適切にH2/H3へ下げる\n"
+            "- 同じ内容を繰り返す段落は統合・削除し、各セクションが指定レンジに収まるよう過剰な部分は簡潔に要約する\n\n"
             f"{conclusion_clause}\n"
             "=== 元ドラフト(JSON) ===\n"
             f"{prompt_json}\n"
@@ -1407,6 +1588,11 @@ class DraftGenerationPipeline:
                 instruction,
                 temperature=max(0.2, min(context.llm_temperature, 0.6)),
                 max_tokens=2800,
+                log_info={
+                    "stage": "refine_draft",
+                    "job_id": context.job_id,
+                    "draft_id": context.draft_id,
+                },
             )
             raw_text = str(result.get("text") or "").strip()
             normalized_text = self._strip_json_fence(raw_text)
@@ -1590,7 +1776,15 @@ class DraftGenerationPipeline:
         generated_text = ""
         temperature = min(max(context.llm_temperature, 0.1), 0.85)
         try:
-            result = self._generate_grounded_content(prompt, temperature=temperature)
+            result = self._generate_grounded_content(
+                prompt,
+                temperature=temperature,
+                log_info={
+                    "stage": "finalize_title",
+                    "job_id": context.job_id,
+                    "draft_id": context.draft_id,
+                },
+            )
             generated_text = result.get("text", "") if isinstance(result, dict) else ""
         except Exception as exc:
             logger.warning("Job %s: finalize_title failed (%s)", context.job_id, exc)
@@ -1659,7 +1853,13 @@ class DraftGenerationPipeline:
             logger.error("Link proposal failed: %s", e)
             return []
 
-    def evaluate_quality(self, draft: Dict, context: PipelineContext) -> Dict:
+    def evaluate_quality(
+        self,
+        draft: Dict,
+        context: PipelineContext,
+        outline: Optional[Dict] = None,
+        title_result: Optional[Dict[str, Any]] = None,
+    ) -> Dict:
         claims_without_citations = [c for c in draft.get("claims", []) if not c.get("citations")]
         duplication_score = 0.08 if context.article_type == "ranking" else 0.12
         sections_payload = draft
@@ -1687,25 +1887,29 @@ class DraftGenerationPipeline:
         ng_hits = self._scan_phrases(text_segments, NG_PHRASES)
         abstract_hits = self._scan_phrases(text_segments, ABSTRACT_PATTERNS)
 
-        expected_intent_map = {
-            "information": "information",
-            "comparison": "comparison",
-            "ranking": "comparison",
-            "closing": "transaction",
-        }
-        expected_intent = expected_intent_map.get(context.article_type, context.intent)
+        headings: List[str] = []
+        for section in sections:
+            heading = str(section.get("h2") or section.get("heading") or "").strip()
+            if heading:
+                headings.append(heading)
+        if outline and isinstance(outline, dict):
+            for section in outline.get("h2", []):
+                heading = str(section.get("text") or "").strip()
+                if heading:
+                    headings.append(heading)
+        title_text = ""
+        if isinstance(title_result, dict):
+            title_text = str(title_result.get("final_title") or title_result.get("provisional_title") or "").strip()
 
-        rubric = {
-            "意図適合": "pass" if context.intent == expected_intent else "attention",
-            "再現性": "pass" if sections else "attention",
-            "E-E-A-T": "pass" if has_citations else "attention",
-            "事実整合": "pass" if not claims_without_citations else "review",
-            "独自性": "pass" if duplication_score < 0.25 else "review",
-        }
-        pass_count = sum(1 for value in rubric.values() if value == "pass")
-        rubric_summary = (
-            f"{context.quality_rubric or 'standard'} rubric: {pass_count}/{len(rubric)} pass"
+        writer_rubric = self._score_writer_rubric(
+            context=context,
+            sections=sections,
+            headings=headings,
+            title_text=title_text,
+            text_segments=text_segments,
+            numeric_facts=numeric_facts,
         )
+        rubric_summary = writer_rubric.get("summary") or f"{context.quality_rubric or 'writer'} rubric"
 
         style_flags: List[str] = []
         existing_flags = draft.get("quality", {}).get("style_violations") if isinstance(draft, dict) else []
@@ -1732,13 +1936,154 @@ class DraftGenerationPipeline:
             "claims": claims_without_citations,
             "style_violations": deduped_flags,
             "is_ymyl": context.article_type in {"information", "comparison"} and not has_citations,
-            "rubric": {**rubric, "summary": rubric_summary},
+            "rubric": writer_rubric,
             "rubric_summary": rubric_summary,
             "citation_count": citation_count,
             "numeric_facts": numeric_facts,
             "ng_phrases": ng_hits,
             "abstract_phrases": abstract_hits,
         }
+
+    def _score_writer_rubric(
+        self,
+        context: PipelineContext,
+        sections: List[Dict[str, Any]],
+        headings: List[str],
+        title_text: str,
+        text_segments: List[str],
+        numeric_facts: int,
+    ) -> Dict[str, Any]:
+        """Score writer-facing rubric (intent, balance, specificity, structure)."""
+        full_text = "\n".join(text_segments)
+        first_block = full_text[:400]
+        keyword_surface = self._sanitize_keyword_surface(context.primary_keyword)
+        is_glossary = context.keyword_preset == "glossary" or self._is_glossary_keyword(
+            context.primary_keyword,
+            context.article_type,
+        )
+
+        has_definition = bool(re.search(r"とは", first_block)) or bool(
+            re.search(rf"{re.escape(keyword_surface)}[^。\n]*とは", first_block)
+        )
+        has_intro = bool(re.search(r"(この記事|本記事|読み終わると|わかること)", first_block))
+        has_summary_heading = any("まとめ" in h or "結論" in h for h in headings[-2:]) if headings else False
+
+        foundational_terms = [
+            "SEO",
+            "コンテンツ",
+            "オウンド",
+            "SNS",
+            "メール",
+            "MA",
+            "マーケティングオートメーション",
+            "チャネル",
+            "施策",
+            "ファネル",
+        ]
+        measurement_terms = [
+            "GA4",
+            "Google広告",
+            "広告",
+            "計測",
+            "トラッキング",
+            "タグ",
+            "P-Max",
+            "PMax",
+            "アトリビューション",
+            "コンバージョン",
+            "BigQuery",
+            "DDA",
+        ]
+        foundation_hits = self._count_hits(full_text, foundational_terms)
+        measurement_hits = self._count_hits(full_text, measurement_terms)
+        balance_ratio = (foundation_hits + 1) / (measurement_hits + 1)
+
+        section_count = max(len(sections), 1)
+        section_example_hits = 0
+        for section in sections:
+            if any(re.search(r"(例|事例|ケース|例えば)", str(p.get("text", ""))) for p in section.get("paragraphs", [])):
+                section_example_hits += 1
+        example_ratio = section_example_hits / section_count
+
+        sentences = [s for text in text_segments for s in re.split(r"[。！!？?]", text) if s.strip()]
+        avg_sentence_len = sum(len(s) for s in sentences) / len(sentences) if sentences else 0
+        desu_count = sum(text.count("です") + text.count("ます") for text in text_segments)
+        desu_ratio = desu_count / max(len(sentences), 1)
+        bullet_count = sum(
+            1 for text in text_segments for line in text.splitlines() if line.strip().startswith(("-", "・", "●", "*"))
+        )
+
+        def clamp_score(value: float) -> int:
+            return max(1, min(5, int(round(value))))
+
+        intent_score = 3
+        if has_definition:
+            intent_score += 2
+        elif is_glossary:
+            intent_score -= 1
+        if balance_ratio < 0.6:
+            intent_score -= 1
+        intent_score = clamp_score(intent_score)
+
+        balance_score = clamp_score(
+            3
+            + (1 if balance_ratio >= 1 else 0)
+            + (1 if foundation_hits >= 4 else 0)
+            - (1 if measurement_hits > foundation_hits * 1.8 else 0)
+        )
+
+        specificity_score = clamp_score(
+            2
+            + (2 if example_ratio >= 0.6 else 1 if example_ratio >= 0.3 else 0)
+            + (1 if numeric_facts >= 3 else 0)
+        )
+
+        title_has_keyword = False
+        if title_text:
+            title_has_keyword = keyword_surface in title_text or f"{keyword_surface}とは" in title_text
+        heading_coverage = sum(
+            1
+            for key in ("チャネル", "施策", "KPI", "成功", "失敗", "まとめ")
+            if any(key in h for h in headings)
+        )
+        heading_score = clamp_score(
+            2
+            + (2 if title_has_keyword or not title_text else -1 if is_glossary else 0)
+            + (1 if heading_coverage >= 2 else 0)
+            + (1 if has_summary_heading else 0)
+        )
+
+        opening_score = clamp_score(
+            2 + (1 if has_intro else 0) + (1 if has_definition else 0) + (1 if has_summary_heading else 0)
+        )
+
+        tone_score = clamp_score(
+            3 + (1 if desu_ratio >= 0.25 else -1) + (1 if avg_sentence_len <= 70 else -1)
+        )
+        if context.tone == "formal" and desu_ratio < 0.2:
+            tone_score = clamp_score(tone_score - 1)
+
+        readability_score = clamp_score(
+            3 + (1 if avg_sentence_len <= 70 else 0) + (1 if bullet_count <= len(text_segments) else -1)
+        )
+
+        scores_numeric = {
+            "検索意図・定義明示": intent_score,
+            "トピック網羅・バランス": balance_score,
+            "具体例・事例の充実": specificity_score,
+            "タイトル/見出しの適合": heading_score,
+            "冒頭とまとめの明瞭さ": opening_score,
+            "トーン・文体": tone_score,
+            "読みやすさ": readability_score,
+        }
+        avg_score = round(sum(scores_numeric.values()) / len(scores_numeric), 1)
+        rubric = {key: f"{value}/5" for key, value in scores_numeric.items()}
+        rubric["summary"] = (
+            f"ライターRubric 平均 {avg_score}/5 "
+            f"(intent:{scores_numeric['検索意図・定義明示']}, balance:{scores_numeric['トピック網羅・バランス']}, "
+            f"examples:{scores_numeric['具体例・事例の充実']})"
+        )
+        return rubric
 
     def bundle_outputs(self, context: PipelineContext, outline: Dict, draft: Dict, meta: Dict, links: List[Dict], quality: Dict) -> Dict:
         metadata = {
@@ -1748,6 +2093,9 @@ class DraftGenerationPipeline:
             "article_type": context.article_type,
             "output_format": context.output_format,
             "heading_mode": context.heading_mode,
+            "primary_keyword": context.primary_keyword,
+            "expertise_level": context.expertise_level,
+            "tone": context.tone,
         }
         if context.cta:
             metadata["intended_cta"] = context.cta
@@ -1772,6 +2120,8 @@ class DraftGenerationPipeline:
             metadata["project_template_id"] = context.project_template_id
         if context.serp_gap_topics:
             metadata["serp_gap_topics"] = ", ".join(context.serp_gap_topics)
+        if context.keyword_preset:
+            metadata["keyword_preset"] = context.keyword_preset
         metadata["llm_provider"] = context.llm_provider
         metadata["llm_model"] = context.llm_model
         metadata["llm_temperature"] = f"{context.llm_temperature:.2f}"
@@ -1828,7 +2178,7 @@ class DraftGenerationPipeline:
         if isinstance(word_range_raw, (list, tuple)) and len(word_range_raw) >= 2:
             word_count_range = f"{word_range_raw[0]}-{word_range_raw[1]}"
         else:
-            word_count_range = str(word_range_raw) if word_range_raw else None
+            word_count_range = self._coerce_word_count_for_preset(word_range_raw, None)
 
         project_id = payload.get("project_id") or self.settings.project_id
         project_defaults = get_project_defaults(project_id)
@@ -1854,7 +2204,13 @@ class DraftGenerationPipeline:
         serp_gap_topics = self._derive_serp_gap_topics(serp_snapshot, payload.get("primary_keyword", ""))
 
         # Get expertise_level and tone from payload
+        article_type = payload.get("article_type", "information")
+        keyword_preset = self._infer_keyword_preset(payload.get("primary_keyword", ""), article_type)
         expertise_level = payload.get("expertise_level", "intermediate")
+        expertise_level = self._coerce_expertise_level_for_preset(expertise_level, keyword_preset)
+        # Apply preset-specific defaults if word_count_range was not explicitly provided
+        if not word_range_raw:
+            word_count_range = self._coerce_word_count_for_preset(word_count_range, keyword_preset)
         tone = payload.get("tone", "formal")
 
         context = PipelineContext(
@@ -1865,7 +2221,7 @@ class DraftGenerationPipeline:
             primary_keyword=payload["primary_keyword"],
             persona=payload.get("persona", {}),
             intent=intent,
-            article_type=payload.get("article_type", "information"),
+            article_type=article_type,
             cta=payload.get("intended_cta"),
             heading_mode=heading_mode,
             heading_overrides=heading_overrides,
@@ -1886,6 +2242,7 @@ class DraftGenerationPipeline:
             serp_gap_topics=serp_gap_topics,
             expertise_level=expertise_level,
             tone=tone,
+            keyword_preset=keyword_preset,
         )
         step_start = time.time()
         conclusion = self.extract_conclusion(context)
@@ -1942,7 +2299,7 @@ class DraftGenerationPipeline:
         logger.info("Job %s: link proposal took %.2f seconds", job_id, time.time() - step_start)
 
         step_start = time.time()
-        quality = self.evaluate_quality(draft, context)
+        quality = self.evaluate_quality(draft, context, outline=outline, title_result=title_result)
         if style_diagnostics.get("style_rewrite_metrics"):
             quality["style_rewrite_metrics"] = style_diagnostics["style_rewrite_metrics"]
         quality["style_rewritten"] = style_diagnostics.get("style_rewritten", False)
