@@ -456,6 +456,10 @@ class DraftGenerationPipeline:
             context.keyword_preset,
         )
         budget = self._estimate_section_word_budget(context, len(template_sections) or 1)
+        for idx, section in enumerate(template_sections):
+            section.setdefault("id", f"sec{idx+1}")
+            section.setdefault("level", "h2")
+            section.setdefault("section_goal", self._derive_section_goal(section.get("text") or section.get("heading") or "", context))
         for section in template_sections:
             section.setdefault("estimated_words", budget)
             for h3 in section.get("h3", []):
@@ -464,11 +468,8 @@ class DraftGenerationPipeline:
         for gap_topic in context.serp_gap_topics[:max_gap_topics]:
             template_sections.append(
                 {
-                    "id": f"sec{len(template_sections)+1}",
-                    "level": "h2",
                     "text": f"{gap_topic}の差別化と未カバー情報",
                     "purpose": "Gap",
-                    "section_goal": self._derive_section_goal(f"{gap_topic}の差別化と未カバー情報", context),
                     "h3": [
                         {"text": f"{gap_topic}の現状データと根拠", "purpose": "Gap"},
                         {"text": f"{gap_topic}で提示する具体的な打ち手", "purpose": "Gap"},
@@ -476,6 +477,11 @@ class DraftGenerationPipeline:
                     "estimated_words": budget,
                 }
             )
+        # Re-assign IDs/section_goal after appending gap topics
+        for idx, section in enumerate(template_sections):
+            section["id"] = f"sec{idx+1}"
+            section["level"] = "h2"
+            section["section_goal"] = self._derive_section_goal(section.get("text") or section.get("heading") or "", context)
         quest_title = self._build_quest_title(keyword, context)
         return {
             "title": quest_title,
