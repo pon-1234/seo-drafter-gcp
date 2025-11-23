@@ -884,7 +884,7 @@ class DraftGenerationPipeline:
                     "level": "h2",
                     "text": section["text"],
                     "purpose": section.get("purpose", "Know"),
-                    "section_goal": self._derive_section_goal(section["text"], context),
+                    "section_goal": section.get("section_goal"),
                     "h3": [dict(item) for item in section.get("h3", [])],
                 }
             )
