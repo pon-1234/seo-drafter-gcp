@@ -1466,6 +1466,16 @@ class DraftGenerationPipeline:
             f"入力データ:\n{json.dumps(payload, ensure_ascii=False)}"
         )
         result_payload: Dict[str, Any] = {}
+        # Ensure prompt snapshot is emitted even if downstream parsing fails.
+        self._log_prompt_snapshot(
+            prompt=prompt,
+            messages=None,
+            log_info={
+                "stage": "conclusion",
+                "job_id": context.job_id,
+                "draft_id": context.draft_id,
+            },
+        )
         try:
             result = self._generate_grounded_content(
                 prompt,
