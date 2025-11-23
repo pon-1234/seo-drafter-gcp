@@ -1350,6 +1350,11 @@ class DraftGenerationPipeline:
         if not getattr(self.settings, "log_prompts", False):
             return
         try:
+            level_name = str(getattr(self.settings, "log_prompts_severity", "INFO")).upper()
+            severity = getattr(logging, level_name, logging.INFO)
+        except Exception:
+            severity = logging.INFO
+        try:
             max_chars = int(getattr(self.settings, "log_prompts_max_chars", 2000) or 0)
         except Exception:
             max_chars = 2000
@@ -1378,7 +1383,7 @@ class DraftGenerationPipeline:
             preview = text_blob
             truncated = False
 
-        logger.info("PromptSnapshot %s truncated=%s preview=\n%s", label, truncated, preview)
+        logger.log(severity, "PromptSnapshot %s truncated=%s preview=\n%s", label, truncated, preview)
 
     def _generate_faq(self, context: PipelineContext) -> List[Dict]:
         """Generate FAQ section using the OpenAI gateway."""

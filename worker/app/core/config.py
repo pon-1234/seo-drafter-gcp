@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     llm_max_workers: int = Field(default=4, alias="LLM_MAX_WORKERS")
     log_prompts: bool = Field(default=False, alias="LOG_PROMPTS")
     log_prompts_max_chars: int = Field(default=2000, alias="LOG_PROMPTS_MAX_CHARS")
+    log_prompts_severity: str = Field(default="INFO", alias="LOG_PROMPTS_SEVERITY")
 
 
 @lru_cache
