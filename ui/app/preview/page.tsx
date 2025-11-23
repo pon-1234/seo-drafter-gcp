@@ -563,7 +563,7 @@ function PreviewPageContent() {
               ) : null}
               {bundle.quality.rubric_scores ? (
                 <div className="mt-4 space-y-1 text-sm text-slate-700">
-                  <p className="font-semibold text-slate-800">Rubric詳細（5観点）</p>
+                  <p className="font-semibold text-slate-800">Rubric詳細（ライター向け）</p>
                   {Object.entries(bundle.quality.rubric_scores).map(([key, value]) => (
                     <div key={key} className="flex items-center justify-between rounded-md border border-slate-200 px-3 py-2">
                       <span className="text-slate-600">{key}</span>
