@@ -59,6 +59,8 @@ class PipelineContext:
     serp_gap_topics: List[str]
     expertise_level: str  # "beginner" | "intermediate" | "expert"
     tone: str  # "casual" | "formal"
+    site_context: List[Dict[str, Any]]
+    post_publish_metrics: Dict[str, Any]
     keyword_preset: Optional[str] = None  # e.g., "glossary" for 「◯◯とは」 intent
 
 
@@ -259,6 +261,7 @@ class DraftGenerationPipeline:
             outline["provisional_title"] = outline["title"]
         if conclusion:
             self._apply_conclusion_to_outline(outline, context, conclusion)
+        outline = self._annotate_outline_with_site_context(outline, context)
         return outline
 
     def _build_quest_title(self, primary_keyword: str, context: Optional[PipelineContext] = None) -> str:
@@ -397,6 +400,15 @@ class DraftGenerationPipeline:
         return None
 
     @staticmethod
+    def _target_reader_level_from_expertise(expertise_level: str) -> str:
+        mapping = {
+            "beginner": "beginner",
+            "intermediate": "middle",
+            "expert": "advanced",
+        }
+        return mapping.get(expertise_level, "middle")
+
+    @staticmethod
     def _coerce_expertise_level_for_preset(requested: str, preset: Optional[str]) -> str:
         """Balance expertise level for certain presets."""
         if preset == "glossary" and requested == "intermediate":
@@ -495,6 +507,7 @@ class DraftGenerationPipeline:
             keyword,
             context.expertise_level,
             context.keyword_preset,
+            target_reader_level=self._target_reader_level_from_expertise(context.expertise_level),
         )
         budget = self._estimate_section_word_budget(context, len(template_sections) or 1)
         for idx, section in enumerate(template_sections):
@@ -536,70 +549,119 @@ class DraftGenerationPipeline:
         keyword: str,
         expertise_level: str = "intermediate",
         keyword_preset: Optional[str] = None,
+        *,
+        target_reader_level: str = "middle",
     ) -> List[Dict[str, Any]]:
         # Beginner-friendly templates (optimized for "◯◯とは" search intent)
         keyword_surface = self._sanitize_keyword_surface(keyword)
+        def _default_role_tags(purpose: str) -> List[str]:
+            mapping = {
+                "Lead": ["QUEST:Q", "JOURNEY:認知"],
+                "Definition": ["QUEST:S", "JOURNEY:認知"],
+                "Context": ["QUEST:U", "JOURNEY:検討"],
+                "Channels": ["QUEST:S", "JOURNEY:検討", "VAK:V"],
+                "KPI": ["QUEST:S", "JOURNEY:検討", "VAK:K"],
+                "Risk": ["QUEST:E", "JOURNEY:比較"],
+                "Close": ["QUEST:T", "JOURNEY:意思決定", "VAK:A"],
+                "Gap": ["QUEST:E", "JOURNEY:検討"],
+            }
+            return mapping.get(purpose, [])
+
+        def _recommended_visuals(purpose: str) -> List[str]:
+            visuals = {
+                "Lead": ["ファネル図"],
+                "Definition": ["概念図"],
+                "Context": ["時系列チャート"],
+                "Channels": ["チャネル比較表"],
+                "KPI": ["KPIツリー"],
+                "Risk": ["注意点箇条書き"],
+                "Close": ["チェックリスト"],
+                "Gap": ["補完トピックの比較表"],
+            }
+            return visuals.get(purpose, [])
+
         beginner_information_template = [
             {
                 "text": f"{keyword_surface}とは何か？今さら聞けない基礎を整理する",
                 "purpose": "Lead",
+                "role_tags": _default_role_tags("Lead"),
+                "target_reader_level": target_reader_level,
+                "recommended_visuals": _recommended_visuals("Lead"),
                 "h3": [
-                    {"text": "いま抱えている悩みと、放置すると起きること", "purpose": "LeadQuest"},
-                    {"text": f"{keyword_surface}で得られる価値とこの記事の流れ", "purpose": "LeadQuest"},
-                    {"text": "読み終えたあとに実践できる一歩", "purpose": "LeadQuest"},
+                    {"text": "いま抱えている悩みと、放置すると起きること", "purpose": "LeadQuest", "role_tags": ["QUEST:Q", "JOURNEY:認知"]},
+                    {"text": f"{keyword_surface}で得られる価値とこの記事の流れ", "purpose": "LeadQuest", "role_tags": ["QUEST:S", "JOURNEY:認知"]},
+                    {"text": "読み終えたあとに実践できる一歩", "purpose": "LeadQuest", "role_tags": ["QUEST:T", "JOURNEY:意思決定"]},
                 ],
             },
             {
                 "text": f"{keyword_surface}とは何か（定義と従来マーケとの違い）",
                 "purpose": "Definition",
+                "role_tags": _default_role_tags("Definition"),
+                "target_reader_level": target_reader_level,
+                "recommended_visuals": _recommended_visuals("Definition"),
                 "h3": [
-                    {"text": f"{keyword_surface}の定義を一文で明示", "purpose": "Definition"},
-                    {"text": "従来マーケとの違いと役割分担", "purpose": "Difference"},
-                    {"text": "向いているケース・向かないケース", "purpose": "FitUnfit"},
+                    {"text": f"{keyword_surface}の定義を一文で明示", "purpose": "Definition", "role_tags": ["QUEST:S"]},
+                    {"text": "従来マーケとの違いと役割分担", "purpose": "Difference", "role_tags": ["JOURNEY:認知"]},
+                    {"text": "向いているケース・向かないケース", "purpose": "FitUnfit", "role_tags": ["JOURNEY:比較"]},
                 ],
             },
             {
                 "text": f"いま{keyword_surface}が重要になっている背景",
                 "purpose": "Context",
+                "role_tags": _default_role_tags("Context"),
+                "target_reader_level": target_reader_level,
+                "recommended_visuals": _recommended_visuals("Context"),
                 "h3": [
-                    {"text": "市場環境や顧客行動の変化", "purpose": "MarketShift"},
-                    {"text": "法規制・技術トレンド（Cookie/個人情報保護など）", "purpose": "Regulation"},
-                    {"text": "オフライン施策との役割分担", "purpose": "OfflineRole"},
+                    {"text": "市場環境や顧客行動の変化", "purpose": "MarketShift", "role_tags": ["QUEST:U", "JOURNEY:認知"]},
+                    {"text": "法規制・技術トレンド（Cookie/個人情報保護など）", "purpose": "Regulation", "role_tags": ["QUEST:U"]},
+                    {"text": "オフライン施策との役割分担", "purpose": "OfflineRole", "role_tags": ["JOURNEY:検討"]},
                 ],
             },
             {
                 "text": "主な施策・チャネルの種類と役割",
                 "purpose": "Channels",
+                "role_tags": _default_role_tags("Channels"),
+                "target_reader_level": target_reader_level,
+                "recommended_visuals": _recommended_visuals("Channels"),
                 "h3": [
-                    {"text": "自社サイト/SEO/コンテンツマーケの基礎", "purpose": "OwnedSeo"},
-                    {"text": "広告・SNSでの集客と向き不向き", "purpose": "AdsSNS"},
-                    {"text": "メール/MA/ウェビナーなど育成施策", "purpose": "Nurture"},
+                    {"text": "自社サイト/SEO/コンテンツマーケの基礎", "purpose": "OwnedSeo", "role_tags": ["VAK:V"]},
+                    {"text": "広告・SNSでの集客と向き不向き", "purpose": "AdsSNS", "role_tags": ["JOURNEY:認知"]},
+                    {"text": "メール/MA/ウェビナーなど育成施策", "purpose": "Nurture", "role_tags": ["JOURNEY:検討"]},
                 ],
             },
             {
                 "text": "成功させるためのポイント・KPI設計",
                 "purpose": "KPI",
+                "role_tags": _default_role_tags("KPI"),
+                "target_reader_level": target_reader_level,
+                "recommended_visuals": _recommended_visuals("KPI"),
                 "h3": [
-                    {"text": "ファネル別のKPIと計測の考え方", "purpose": "FunnelKPI"},
-                    {"text": "組織・体制づくりとリソース配分", "purpose": "Org"},
-                    {"text": "ツール活用は代表例のみ挙げ、設定手順は避ける", "purpose": "ToolsLight"},
+                    {"text": "ファネル別のKPIと計測の考え方", "purpose": "FunnelKPI", "role_tags": ["VAK:K"]},
+                    {"text": "組織・体制づくりとリソース配分", "purpose": "Org", "role_tags": ["JOURNEY:検討"]},
+                    {"text": "ツール活用は代表例のみ挙げ、設定手順は避ける", "purpose": "ToolsLight", "role_tags": ["VAK:K"]},
                 ],
             },
             {
                 "text": "よくある失敗パターンと対策",
                 "purpose": "Risk",
+                "role_tags": _default_role_tags("Risk"),
+                "target_reader_level": target_reader_level,
+                "recommended_visuals": _recommended_visuals("Risk"),
                 "h3": [
-                    {"text": "チャネルごとの部分最適・計測偏重になりがち", "purpose": "ChannelSilod"},
-                    {"text": "ターゲット/メッセージのずれ", "purpose": "MessageMismatch"},
-                    {"text": "短期で判断しすぎる/データの読み違い", "purpose": "ShortTerm"},
+                    {"text": "チャネルごとの部分最適・計測偏重になりがち", "purpose": "ChannelSilod", "role_tags": ["QUEST:E"]},
+                    {"text": "ターゲット/メッセージのずれ", "purpose": "MessageMismatch", "role_tags": ["QUEST:E"]},
+                    {"text": "短期で判断しすぎる/データの読み違い", "purpose": "ShortTerm", "role_tags": ["QUEST:E"]},
                 ],
             },
             {
                 "text": f"まとめと今日から取れる一歩（{keyword_surface}の活かし方）",
                 "purpose": "Close",
+                "role_tags": _default_role_tags("Close"),
+                "target_reader_level": target_reader_level,
+                "recommended_visuals": _recommended_visuals("Close"),
                 "h3": [
-                    {"text": "主要ポイントの振り返り", "purpose": "Recap"},
-                    {"text": "すぐに試せる1アクションとCTA", "purpose": "Action"},
+                    {"text": "主要ポイントの振り返り", "purpose": "Recap", "role_tags": ["QUEST:T"]},
+                    {"text": "すぐに試せる1アクションとCTA", "purpose": "Action", "role_tags": ["QUEST:T", "JOURNEY:意思決定"]},
                 ],
             },
         ]
@@ -1426,6 +1488,39 @@ class DraftGenerationPipeline:
             prev_blank = is_blank
 
         return "\n".join(collapsed)
+
+    def _annotate_outline_with_site_context(self, outline: Dict, context: PipelineContext) -> Dict:
+        """Mark outline sections with potential cannibalization/internal link targets."""
+        if not isinstance(outline, dict):
+            return outline
+        sections = outline.get("h2")
+        site_ctx = context.site_context or []
+        if not site_ctx or not isinstance(sections, list):
+            return outline
+
+        def _normalize(text: str) -> str:
+            return re.sub(r"\s+", "", text.lower())
+
+        for section in sections:
+            heading = str(section.get("text") or section.get("heading") or "").strip()
+            if not heading:
+                continue
+            normalized_heading = _normalize(heading)
+            overlaps: List[Dict[str, str]] = []
+            for entry in site_ctx:
+                title = str(entry.get("title") or "").strip()
+                url = str(entry.get("url") or "").strip()
+                keywords = entry.get("keywords") or entry.get("primary_keyword") or ""
+                summary = str(entry.get("summary") or "").strip()
+                if not title:
+                    continue
+                if _normalize(title) == normalized_heading or (_normalize(keywords) and _normalize(keywords) in normalized_heading):
+                    overlaps.append({"title": title, "url": url, "summary": summary})
+            if overlaps:
+                section["needs_manual_review"] = True
+                section["internal_link_targets"] = overlaps
+                section["cannibalization_warning"] = "既存記事と重複の可能性あり。切り口をずらすか改訂案に切り替えを検討。"
+        return outline
 
     @staticmethod
     def _strip_template_labels_from_heading(text: str) -> str:
@@ -2410,6 +2505,55 @@ class DraftGenerationPipeline:
         )
         return rubric
 
+    def _post_publish_feedback(
+        self,
+        context: PipelineContext,
+        outline: Dict,
+        draft: Dict,
+    ) -> Dict[str, Any]:
+        """Generate post-publication revision suggestions based on simple GA/GSC metrics."""
+        metrics = context.post_publish_metrics or {}
+        if not metrics:
+            return {}
+
+        ctr = float(metrics.get("ctr") or 0)
+        position = float(metrics.get("position") or 0)
+        dwell = float(metrics.get("dwell_time_seconds") or metrics.get("avg_time_on_page") or 0)
+        conversion = float(metrics.get("conversions") or 0)
+
+        actions: List[Dict[str, Any]] = []
+        revision_outline: List[Dict[str, Any]] = []
+
+        if ctr < 0.03 or position > 8:
+            actions.append({
+                "issue": "CTR低下/順位低い",
+                "recommendation": "タイトルとメタディスクリプションを再生成し、検索意図に直結するベネフィットを先頭に置く",
+                "priority": "high",
+            })
+        if dwell < 45:
+            actions.append({
+                "issue": "滞在時間が短い",
+                "recommendation": "導入と最初のH2を強化し、冒頭300文字で課題と結論を明示する",
+                "priority": "high",
+            })
+            revision_outline.append({"target_h2": "結論", "action": "冒頭の定義と箇条書きを濃くする"})
+        if conversion == 0:
+            actions.append({
+                "issue": "CVが少ない/ゼロ",
+                "recommendation": "終盤のCTAと事例/FAQを再設計し、読者の次の一歩を具体化する",
+                "priority": "medium",
+            })
+            revision_outline.append({"target_h2": "まとめ", "action": "CTAと具体ステップを追記"})
+
+        if not actions:
+            actions.append({"issue": "安定", "recommendation": "大幅な改訂は不要。微修正のみ検討。", "priority": "low"})
+
+        return {
+            "metrics": metrics,
+            "actions": actions,
+            "revision_outline": revision_outline,
+        }
+
     def bundle_outputs(self, context: PipelineContext, outline: Dict, draft: Dict, meta: Dict, links: List[Dict], quality: Dict) -> Dict:
         metadata = {
             "job_id": context.job_id,
@@ -2450,6 +2594,15 @@ class DraftGenerationPipeline:
         metadata["llm_provider"] = context.llm_provider
         metadata["llm_model"] = context.llm_model
         metadata["llm_temperature"] = f"{context.llm_temperature:.2f}"
+        metadata["generation_context"] = {
+            "llm_provider": context.llm_provider,
+            "llm_model": context.llm_model,
+            "llm_temperature": context.llm_temperature,
+            "prompt_version": context.prompt_version,
+            "pipeline_version": "v1",
+            "article_type": context.article_type,
+            "persona_label": infer_japanese_persona_label(context.persona, context.writer_persona),
+        }
 
         return {
             "outline": outline,
@@ -2517,6 +2670,13 @@ class DraftGenerationPipeline:
         reference_media = [
             str(item).strip() for item in reference_media_raw if str(item).strip()
         ]
+        site_context_raw = payload.get("site_context") or []
+        site_context: List[Dict[str, Any]] = []
+        if isinstance(site_context_raw, list):
+            for entry in site_context_raw:
+                if isinstance(entry, dict):
+                    site_context.append(entry)
+        post_publish_metrics = payload.get("post_publish_metrics") if isinstance(payload.get("post_publish_metrics"), dict) else {}
         prompt_layers = project_defaults.get("prompt_layers", {})
         llm_provider = self._active_llm.get("provider") or self.settings.llm_provider or "openai"
         llm_model = self._active_llm.get("model") or self._default_model_for_provider(llm_provider)
@@ -2568,6 +2728,8 @@ class DraftGenerationPipeline:
             expertise_level=expertise_level,
             tone=tone,
             keyword_preset=keyword_preset,
+            site_context=site_context,
+            post_publish_metrics=post_publish_metrics or {},
         )
         step_start = time.time()
         conclusion = self.extract_conclusion(context)
@@ -2636,6 +2798,8 @@ class DraftGenerationPipeline:
             quality["editor_checklist"] = editor_checklist
         logger.info("Job %s: quality evaluation took %.2f seconds", job_id, time.time() - step_start)
 
+        post_publish_plan = self._post_publish_feedback(context, outline, draft)
+
         bundle = self.bundle_outputs(context, outline, draft, meta, links, quality)
         metadata = bundle.get("metadata")
         if not isinstance(metadata, dict):
@@ -2655,6 +2819,8 @@ class DraftGenerationPipeline:
             bundle["sections_original"] = style_diagnostics["sections_original"]
             bundle["sections_rewritten"] = style_diagnostics["sections_rewritten"]
         bundle["editor_checklist"] = editor_checklist
+        if post_publish_plan:
+            bundle["post_publish_plan"] = post_publish_plan
         if conclusion:
             main_conclusion = conclusion.get("main_conclusion")
             if main_conclusion:
