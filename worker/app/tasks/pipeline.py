@@ -305,8 +305,15 @@ class DraftGenerationPipeline:
         if not main_conclusion:
             return f"結論：{keyword_surface}のポイント"
         head = re.split(r"[。]", main_conclusion, 1)[0].strip()
-        if len(head) > 32:
-            head = head[:32] + "…"
+        max_len = 32
+        if len(head) > max_len:
+            for sep in ["、", "，", "・", " "]:
+                pos = head.find(sep)
+                if 0 < pos <= max_len:
+                    head = head[:pos]
+                    break
+        if len(head) > max_len:
+            head = head[:max_len]
         return f"結論：{head or keyword_surface}"
 
     def _apply_conclusion_to_outline(
