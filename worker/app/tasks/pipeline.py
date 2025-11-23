@@ -500,12 +500,12 @@ class DraftGenerationPipeline:
         keyword_surface = self._sanitize_keyword_surface(keyword)
         beginner_information_template = [
             {
-                "text": f"リード文：{keyword_surface}とは何かをQUESTで提示（定義を冒頭に置く）",
+                "text": f"{keyword_surface}とは何か？今さら聞けない基礎を整理する",
                 "purpose": "Lead",
                 "h3": [
-                    {"text": "Q/U: 読者の悩みと放置するリスク", "purpose": "LeadQuest"},
-                    {"text": f"E/S: {keyword_surface}で得られる価値と記事構成", "purpose": "LeadQuest"},
-                    {"text": "T: 読後に実践できる一歩を示す", "purpose": "LeadQuest"},
+                    {"text": "いま抱えている悩みと、放置すると起きること", "purpose": "LeadQuest"},
+                    {"text": f"{keyword_surface}で得られる価値とこの記事の流れ", "purpose": "LeadQuest"},
+                    {"text": "読み終えたあとに実践できる一歩", "purpose": "LeadQuest"},
                 ],
             },
             {
@@ -1383,6 +1383,36 @@ class DraftGenerationPipeline:
             prev_blank = is_blank
 
         return "\n".join(collapsed)
+
+    @staticmethod
+    def _strip_template_labels_from_heading(text: str) -> str:
+        """Remove internal template labels from headings."""
+        if not text:
+            return text
+        import re
+
+        cleaned = re.sub(r"^リード文[:：]\s*", "", text)
+        cleaned = re.sub(r"^(Q/U:|E/S:|T:)\s*", "", cleaned)
+        cleaned = re.sub(r"\b(QUEST|PREP|FAB|PAS)\b[:：]?\s*", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s{2,}", " ", cleaned)
+        return cleaned.strip()
+
+    def _strip_template_labels_in_draft(self, draft: Dict) -> Dict:
+        """Apply heading label stripping to draft sections to keep UI output clean."""
+        if not isinstance(draft, dict):
+            return draft
+        sections = draft.get("sections")
+        if isinstance(sections, list):
+            for section in sections:
+                if isinstance(section, dict):
+                    if section.get("h2"):
+                        section["h2"] = self._strip_template_labels_from_heading(section["h2"])
+                    paragraphs = section.get("paragraphs")
+                    if isinstance(paragraphs, list):
+                        for paragraph in paragraphs:
+                            if isinstance(paragraph, dict) and paragraph.get("heading"):
+                                paragraph["heading"] = self._strip_template_labels_from_heading(paragraph["heading"])
+        return draft
 
     def _collect_structure_warnings(self, markdown_snapshot: str) -> List[str]:
         if not markdown_snapshot.strip():
@@ -2471,6 +2501,7 @@ class DraftGenerationPipeline:
         step_start = time.time()
         draft = self.refine_draft(context, outline, draft, conclusion=conclusion)
         logger.info("Job %s: draft refinement took %.2f seconds", job_id, time.time() - step_start)
+        draft = self._strip_template_labels_in_draft(draft)
         style_diagnostics = self._maybe_apply_style_rewrite(draft, context)
         markdown_snapshot = self._render_markdown_snapshot(draft, outline, context)
         markdown_snapshot = self._normalize_markdown_structure(markdown_snapshot)
@@ -2517,6 +2548,7 @@ class DraftGenerationPipeline:
         if not isinstance(metadata, dict):
             metadata = {}
             bundle["metadata"] = metadata
+        bundle["markdown"] = markdown_snapshot
         for key in ("provisional_title", "final_title"):
             value = title_result.get(key)
             if value:
