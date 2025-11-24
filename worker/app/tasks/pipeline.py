@@ -2638,6 +2638,18 @@ class DraftGenerationPipeline:
                     "model": fallback_model,
                     "temperature": fallback_temperature,
                 }
+                try:
+                    if OpenAIGateway:
+                        self.ai_gateway = OpenAIGateway(
+                            api_key=self.settings.openai_api_key,
+                            model=fallback_model,
+                            search_enabled=True,
+                            provider=str(fallback_provider).lower(),
+                            anthropic_api_key=self.settings.anthropic_api_key,
+                        )
+                        logger.info("Initialized fallback AI gateway for job %s", job_id)
+                except Exception as gateway_exc:
+                    logger.error("Fallback AI gateway initialization failed for job %s: %s", job_id, gateway_exc)
 
         intent = self.estimate_intent(payload)
         heading_directive = payload.get("heading_directive") or {}
@@ -2652,14 +2664,20 @@ class DraftGenerationPipeline:
         else:
             reference_urls = [str(url).strip() for url in reference_urls_raw if str(url).strip()]
 
+        # Determine article type and expertise before loading project defaults
+        article_type = payload.get("article_type", "information")
+        keyword_preset = self._infer_keyword_preset(payload.get("primary_keyword", ""), article_type)
+        expertise_level = payload.get("expertise_level", "intermediate")
+        expertise_level = self._coerce_expertise_level_for_preset(expertise_level, keyword_preset)
+
         word_range_raw = payload.get("word_count_range")
         if isinstance(word_range_raw, (list, tuple)) and len(word_range_raw) >= 2:
             word_count_range = f"{word_range_raw[0]}-{word_range_raw[1]}"
         else:
-            word_count_range = self._coerce_word_count_for_preset(word_range_raw, None)
+            word_count_range = self._coerce_word_count_for_preset(word_range_raw, keyword_preset)
 
         project_id = payload.get("project_id") or self.settings.project_id
-        project_defaults = get_project_defaults(project_id)
+        project_defaults = get_project_defaults(project_id, expertise_level=expertise_level)
         writer_persona_raw = payload.get("writer_persona") or project_defaults.get("writer_persona") or {}
         writer_persona = dict(writer_persona_raw) if isinstance(writer_persona_raw, dict) else {}
         preferred_sources_raw = payload.get("preferred_sources") or project_defaults.get("preferred_sources", [])
@@ -2688,14 +2706,7 @@ class DraftGenerationPipeline:
         serp_snapshot = self._normalize_serp_snapshot(payload.get("serp_snapshot"))
         serp_gap_topics = self._derive_serp_gap_topics(serp_snapshot, payload.get("primary_keyword", ""))
 
-        # Get expertise_level and tone from payload
-        article_type = payload.get("article_type", "information")
-        keyword_preset = self._infer_keyword_preset(payload.get("primary_keyword", ""), article_type)
-        expertise_level = payload.get("expertise_level", "intermediate")
-        expertise_level = self._coerce_expertise_level_for_preset(expertise_level, keyword_preset)
         # Apply preset-specific defaults if word_count_range was not explicitly provided
-        if not word_range_raw:
-            word_count_range = self._coerce_word_count_for_preset(word_count_range, keyword_preset)
         tone = payload.get("tone", "formal")
 
         context = PipelineContext(
